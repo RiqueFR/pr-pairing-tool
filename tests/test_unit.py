@@ -16,6 +16,8 @@ from pr_pairing import (
     select_reviewers,
     assign_reviewers,
     parse_args,
+    KnowledgeMode,
+    History,
 )
 
 
@@ -34,7 +36,7 @@ class TestParseArgs:
             
             assert args.reviewers == 2
             assert args.team_mode is False
-            assert args.knowledge_mode == "anyone"
+            assert args.knowledge_mode == KnowledgeMode.ANYONE.value
             
             sys.argv = old_argv
         finally:
@@ -80,7 +82,12 @@ class TestParseArgs:
             os.unlink(temp_path)
 
     def test_knowledge_mode_choices(self):
-        modes = ["anyone", "experts-only", "mentorship", "similar-levels"]
+        modes = [
+            (KnowledgeMode.ANYONE, "anyone"),
+            (KnowledgeMode.EXPERTS_ONLY, "experts-only"),
+            (KnowledgeMode.MENTORSHIP, "mentorship"),
+            (KnowledgeMode.SIMILAR_LEVELS, "similar-levels"),
+        ]
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write("name,can_review\nAlice,true")
@@ -90,10 +97,10 @@ class TestParseArgs:
             import sys
             old_argv = sys.argv
             
-            for mode in modes:
-                sys.argv = ['pr_pairing.py', '-i', temp_path, '-k', mode]
+            for enum_mode, str_mode in modes:
+                sys.argv = ['pr_pairing.py', '-i', temp_path, '-k', str_mode]
                 args = parse_args()
-                assert args.knowledge_mode == mode
+                assert args.knowledge_mode == enum_mode.value
             
             sys.argv = old_argv
         finally:
@@ -161,19 +168,20 @@ class TestHistoryFunctions:
         
         history = load_history(temp_path)
         
-        assert history == {"pairs": {}, "last_run": None}
+        assert history.pairs == {}
+        assert history.last_run is None
 
     def test_load_existing_history(self, sample_history):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(sample_history, f)
+            json.dump(sample_history.to_dict(), f)
             temp_path = f.name
 
         try:
             history = load_history(temp_path)
             
-            assert "pairs" in history
-            assert "Alice" in history["pairs"]
-            assert history["pairs"]["Alice"]["Bob"] == 2
+            assert hasattr(history, 'pairs')
+            assert "Alice" in history.pairs
+            assert history.pairs["Alice"]["Bob"] == 2
         finally:
             import os
             os.unlink(temp_path)
@@ -225,21 +233,19 @@ class TestHistoryTracking:
     def test_update_history(self, empty_history):
         update_history(empty_history, "Alice", ["Bob", "Charlie"])
         
-        assert "Alice" in empty_history["pairs"]
-        assert empty_history["pairs"]["Alice"]["Bob"] == 1
-        assert empty_history["pairs"]["Alice"]["Charlie"] == 1
+        assert "Alice" in empty_history.pairs
+        assert empty_history.pairs["Alice"]["Bob"] == 1
+        assert empty_history.pairs["Alice"]["Charlie"] == 1
 
     def test_update_history_increments_existing(self):
-        history = {
-            "pairs": {
-                "Alice": {"Bob": 2}
-            },
-            "last_run": None
-        }
+        history = History(
+            pairs={"Alice": {"Bob": 2}},
+            last_run=None
+        )
         
         update_history(history, "Alice", ["Bob"])
         
-        assert history["pairs"]["Alice"]["Bob"] == 3
+        assert history.pairs["Alice"]["Bob"] == 3
 
 
 class TestSelectReviewers:
@@ -248,7 +254,7 @@ class TestSelectReviewers:
             {"name": "Alice", "team": "frontend", "knowledge_level": 3},
             {"name": "Bob", "team": "backend", "knowledge_level": 3},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Alice",
@@ -270,7 +276,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "backend", "knowledge_level": 3},
             {"name": "Charlie", "team": "backend", "knowledge_level": 3},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Alice",
@@ -288,7 +294,7 @@ class TestSelectReviewers:
         candidates = [
             {"name": "Bob", "team": "backend", "knowledge_level": 3},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Alice",
@@ -308,7 +314,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "backend", "knowledge_level": 2},
             {"name": "Charlie", "team": "backend", "knowledge_level": 4},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Dana",
@@ -318,7 +324,7 @@ class TestSelectReviewers:
             team_mode=False,
             dev_team=None,
             current_assignments={},
-            knowledge_mode="experts-only"
+            knowledge_mode=KnowledgeMode.EXPERTS_ONLY
         )
         
         assert "Bob" not in selected
@@ -332,7 +338,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "backend", "knowledge_level": 2},
             {"name": "Charlie", "team": "backend", "knowledge_level": 4},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Dana",
@@ -342,7 +348,7 @@ class TestSelectReviewers:
             team_mode=False,
             dev_team=None,
             current_assignments={},
-            knowledge_mode="mentorship",
+            knowledge_mode=KnowledgeMode.MENTORSHIP,
             dev_knowledge=1
         )
         
@@ -356,7 +362,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "backend", "knowledge_level": 2},
             {"name": "Charlie", "team": "backend", "knowledge_level": 4},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Dana",
@@ -366,7 +372,7 @@ class TestSelectReviewers:
             team_mode=False,
             dev_team=None,
             current_assignments={},
-            knowledge_mode="mentorship",
+            knowledge_mode=KnowledgeMode.MENTORSHIP,
             dev_knowledge=4
         )
         
@@ -378,7 +384,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "backend", "knowledge_level": 1},
             {"name": "Charlie", "team": "backend", "knowledge_level": 3},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Dana",
@@ -388,7 +394,7 @@ class TestSelectReviewers:
             team_mode=False,
             dev_team=None,
             current_assignments={},
-            knowledge_mode="similar-levels",
+            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS,
             dev_knowledge=2
         )
         
@@ -401,7 +407,7 @@ class TestSelectReviewers:
             {"name": "Bob", "team": "frontend", "knowledge_level": 3},
             {"name": "Charlie", "team": "backend", "knowledge_level": 3},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
             developer="Alice",
@@ -421,12 +427,10 @@ class TestSelectReviewers:
             {"name": "Alice", "team": "frontend", "knowledge_level": 3},
             {"name": "Bob", "team": "backend", "knowledge_level": 3},
         ]
-        history = {
-            "pairs": {
-                "Dana": {"Alice": 5, "Bob": 0}
-            },
-            "last_run": None
-        }
+        history = History(
+            pairs={"Dana": {"Alice": 5, "Bob": 0}},
+            last_run=None
+        )
         
         selected, warnings = select_reviewers(
             developer="Dana",
@@ -447,14 +451,14 @@ class TestAssignReviewers:
             {"name": "Alice", "can_review": "true"},
             {"name": "Bob", "can_review": "true"},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         updated_rows, warnings = assign_reviewers(
             rows=rows,
             history=history,
             num_reviewers=1,
             team_mode=False,
-            knowledge_mode="anyone"
+            knowledge_mode=KnowledgeMode.ANYONE
         )
         
         assert len(updated_rows) == 2
@@ -467,14 +471,14 @@ class TestAssignReviewers:
             {"name": "Bob", "can_review": "false"},
             {"name": "Charlie", "can_review": "true"},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         updated_rows, warnings = assign_reviewers(
             rows=rows,
             history=history,
             num_reviewers=1,
             team_mode=False,
-            knowledge_mode="anyone"
+            knowledge_mode=KnowledgeMode.ANYONE
         )
         
         bob_row = [r for r in updated_rows if r["name"] == "Bob"][0]
@@ -488,14 +492,14 @@ class TestAssignReviewers:
             {"name": "Bob", "can_review": "true", "team": "frontend"},
             {"name": "Charlie", "can_review": "true", "team": "backend"},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         updated_rows, warnings = assign_reviewers(
             rows=rows,
             history=history,
             num_reviewers=1,
             team_mode=True,
-            knowledge_mode="anyone"
+            knowledge_mode=KnowledgeMode.ANYONE
         )
         
         alice_reviewers = [r for r in updated_rows if r["name"] == "Alice"][0]["reviewers"]
@@ -507,14 +511,14 @@ class TestAssignReviewers:
             {"name": "Bob", "can_review": "true", "knowledge_level": "1"},
             {"name": "Charlie", "can_review": "true", "knowledge_level": "3"},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         updated_rows, warnings = assign_reviewers(
             rows=rows,
             history=history,
             num_reviewers=1,
             team_mode=False,
-            knowledge_mode="experts-only"
+            knowledge_mode=KnowledgeMode.EXPERTS_ONLY
         )
         
         bob_row = [r for r in updated_rows if r["name"] == "Bob"][0]
@@ -524,14 +528,14 @@ class TestAssignReviewers:
         rows = [
             {"name": "Alice", "can_review": "true"},
         ]
-        history = {"pairs": {}, "last_run": None}
+        history = History(pairs={}, last_run=None)
         
         updated_rows, warnings = assign_reviewers(
             rows=rows,
             history=history,
             num_reviewers=3,
             team_mode=False,
-            knowledge_mode="anyone"
+            knowledge_mode=KnowledgeMode.ANYONE
         )
         
         assert len(warnings) > 0

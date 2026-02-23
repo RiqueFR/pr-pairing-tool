@@ -4,6 +4,17 @@ Pull Request Pairing Tool
 
 Assigns reviewers to developers for PR reviews with balanced distribution
 and optional team-based pairing.
+
+Usage:
+    python pr_pairing.py -i team.csv -r 2
+    python pr_pairing.py -i team.csv -r 2 --team-mode
+    python pr_pairing.py -i team.csv -r 2 -k experts-only
+    python pr_pairing.py -i team.csv -r 2 -t -k mentorship
+
+Input CSV format:
+    name,can_review,team,knowledge_level
+    Alice,true,frontend,5
+    Bob,true,backend,3
 """
 
 import argparse
@@ -11,16 +22,23 @@ import csv
 import json
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 DEFAULT_REVIEWERS = 2
 DEFAULT_KNOWLEDGE_LEVEL = 3
 EXPERT_MIN_LEVEL = 4
 NOVICE_MAX_LEVEL = 2
-HISTORY_DEFAULT = {"pairs": {}, "last_run": None}
+
+
+class KnowledgeMode(Enum):
+    ANYONE = "anyone"
+    EXPERTS_ONLY = "experts-only"
+    MENTORSHIP = "mentorship"
+    SIMILAR_LEVELS = "similar-levels"
 
 
 @dataclass
@@ -29,10 +47,34 @@ class Developer:
     can_review: bool
     team: str = ""
     knowledge_level: int = DEFAULT_KNOWLEDGE_LEVEL
+    
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
-History = dict[str, dict[str, int]]
-ReviewerCandidate = dict
+@dataclass
+class History:
+    pairs: dict[str, dict[str, int]] = field(default_factory=dict)
+    last_run: Optional[str] = None
+    
+    @staticmethod
+    def from_dict(data: dict) -> "History":
+        return History(
+            pairs=data.get("pairs", {}),
+            last_run=data.get("last_run")
+        )
+    
+    def to_dict(self) -> dict:
+        return {
+            "pairs": self.pairs,
+            "last_run": self.last_run
+        }
+
+
+class ReviewerCandidate(TypedDict):
+    name: str
+    team: str
+    knowledge_level: int
 
 
 class PRPairingError(Exception):
@@ -77,8 +119,8 @@ def parse_args():
     )
     parser.add_argument(
         "-k", "--knowledge-mode",
-        choices=["anyone", "experts-only", "mentorship", "similar-levels"],
-        default="anyone",
+        choices=[km.value for km in KnowledgeMode],
+        default=KnowledgeMode.ANYONE.value,
         help="Knowledge-based pairing mode: anyone (default), experts-only, mentorship, similar-levels"
     )
     return parser.parse_args()
@@ -100,21 +142,22 @@ def load_history(filepath: str) -> History:
     """Load pairing history from JSON file."""
     path = Path(filepath)
     if not path.exists():
-        return HISTORY_DEFAULT.copy()
+        return History()
     
     try:
         with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        return HISTORY_DEFAULT.copy()
+            data = json.load(f)
+            return History.from_dict(data)
+    except json.JSONDecodeError:
+        return History()
 
 
 def save_history(filepath: str, history: History) -> None:
     """Save pairing history to JSON file."""
-    history["last_run"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    history.last_run = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2)
+            json.dump(history.to_dict(), f, indent=2)
     except Exception as e:
         raise FileError(f"Error writing history file: {e}")
 
@@ -154,6 +197,16 @@ def get_team(row: dict) -> str:
     return team.strip() if team else ""
 
 
+def to_developer(row: dict) -> Developer:
+    """Convert a row dict to a Developer object."""
+    return Developer(
+        name=row["name"],
+        can_review=normalize_bool(row.get("can_review", "false")),
+        team=get_team(row),
+        knowledge_level=get_knowledge_level(row)
+    )
+
+
 def is_same_team(candidate: ReviewerCandidate, dev_team: str) -> bool:
     """Check if candidate is on the same team as the developer."""
     return bool(dev_team and candidate.get("team") == dev_team)
@@ -169,7 +222,7 @@ def is_novice(developer_level: int) -> bool:
     return developer_level <= NOVICE_MAX_LEVEL
 
 
-def knowledge_filter(knowledge_mode: str, dev_knowledge: int) -> callable:
+def get_knowledge_filter(knowledge_mode: KnowledgeMode, dev_knowledge: int) -> callable:
     """Return a filter function based on knowledge mode."""
     
     def experts_only_filter(candidate: ReviewerCandidate) -> bool:
@@ -184,9 +237,9 @@ def knowledge_filter(knowledge_mode: str, dev_knowledge: int) -> callable:
         return True
     
     filters = {
-        "experts-only": experts_only_filter,
-        "mentorship": mentorship_filter,
-        "similar-levels": similar_levels_filter,
+        KnowledgeMode.EXPERTS_ONLY: experts_only_filter,
+        KnowledgeMode.MENTORSHIP: mentorship_filter,
+        KnowledgeMode.SIMILAR_LEVELS: similar_levels_filter,
     }
     
     return filters.get(knowledge_mode, lambda c: True)
@@ -194,27 +247,86 @@ def knowledge_filter(knowledge_mode: str, dev_knowledge: int) -> callable:
 
 def get_pair_count(history: History, dev: str, reviewer: str) -> int:
     """Get how many times a reviewer has been paired with a developer."""
-    return history.get("pairs", {}).get(dev, {}).get(reviewer, 0)
+    return history.pairs.get(dev, {}).get(reviewer, 0)
 
 
 def get_total_reviews_assigned(history: History, reviewer: str) -> int:
     """Get total number of reviews assigned to a reviewer."""
     return sum(
         dev_pairs.get(reviewer, 0)
-        for dev_pairs in history.get("pairs", {}).values()
+        for dev_pairs in history.pairs.values()
     )
 
 
 def update_history(history: History, dev: str, reviewers: list[str]) -> None:
     """Update history with new pairings."""
-    if "pairs" not in history:
-        history["pairs"] = {}
-    
-    if dev not in history["pairs"]:
-        history["pairs"][dev] = {}
+    if dev not in history.pairs:
+        history.pairs[dev] = {}
     
     for reviewer in reviewers:
-        history["pairs"][dev][reviewer] = history["pairs"][dev].get(reviewer, 0) + 1
+        history.pairs[dev][reviewer] = history.pairs[dev].get(reviewer, 0) + 1
+
+
+def generate_team_warnings(
+    developer: str,
+    sorted_candidates: list[ReviewerCandidate],
+    num_reviewers: int,
+    dev_team: str
+) -> list[str]:
+    """Generate warnings related to team mode."""
+    warnings = []
+    
+    same_team_count = sum(
+        1 for c in sorted_candidates[:num_reviewers]
+        if is_same_team(c, dev_team)
+    )
+    available_same_team = sum(
+        1 for c in sorted_candidates
+        if is_same_team(c, dev_team)
+    )
+    
+    if same_team_count < num_reviewers and available_same_team > 0:
+        warnings.append(
+            f"{developer}: Only {same_team_count}/{num_reviewers} reviewers from same team"
+        )
+    elif available_same_team == 0 and num_reviewers > 0:
+        warnings.append(
+            f"{developer}: No reviewers available in team '{dev_team}', used other teams"
+        )
+    
+    return warnings
+
+
+def build_sort_key(
+    history: History,
+    developer: str,
+    current_assignments: dict[str, int],
+    team_mode: bool,
+    dev_team: Optional[str],
+    knowledge_mode: KnowledgeMode,
+    dev_knowledge: int
+) -> callable:
+    """Build a sort key function for ranking candidates."""
+    def sort_key(candidate: ReviewerCandidate) -> tuple:
+        name = candidate["name"]
+        pair_count = get_pair_count(history, developer, name)
+        total_reviews = get_total_reviews_assigned(history, name) + current_assignments.get(name, 0)
+        
+        team_factor = 0
+        if team_mode and dev_team:
+            team_factor = 0 if is_same_team(candidate, dev_team) else 1
+        
+        knowledge_factor = 0
+        if knowledge_mode not in (KnowledgeMode.ANYONE, KnowledgeMode.EXPERTS_ONLY):
+            reviewer_knowledge = candidate.get("knowledge_level", DEFAULT_KNOWLEDGE_LEVEL)
+            if knowledge_mode == KnowledgeMode.MENTORSHIP:
+                knowledge_factor = -reviewer_knowledge if is_novice(dev_knowledge) else 0
+            elif knowledge_mode == KnowledgeMode.SIMILAR_LEVELS:
+                knowledge_factor = abs(reviewer_knowledge - dev_knowledge)
+        
+        return (team_factor, knowledge_factor, pair_count, total_reviews)
+    
+    return sort_key
 
 
 def select_reviewers(
@@ -225,7 +337,7 @@ def select_reviewers(
     team_mode: bool,
     dev_team: Optional[str],
     current_assignments: dict[str, int],
-    knowledge_mode: str = "anyone",
+    knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
     dev_knowledge: int = DEFAULT_KNOWLEDGE_LEVEL
 ) -> tuple[list[str], list[str]]:
     """
@@ -239,14 +351,14 @@ def select_reviewers(
     if not candidates:
         return [], [f"No reviewers available for {developer}"]
     
-    if knowledge_mode != "anyone":
-        filter_fn = knowledge_filter(knowledge_mode, dev_knowledge)
+    if knowledge_mode != KnowledgeMode.ANYONE:
+        filter_fn = get_knowledge_filter(knowledge_mode, dev_knowledge)
         filtered_candidates = [c for c in candidates if filter_fn(c)]
         
         if not filtered_candidates:
-            if knowledge_mode == "experts-only":
+            if knowledge_mode == KnowledgeMode.EXPERTS_ONLY:
                 warnings.append(f"{developer}: No experts (level {EXPERT_MIN_LEVEL}-5) available for review")
-            elif knowledge_mode == "mentorship":
+            elif knowledge_mode == KnowledgeMode.MENTORSHIP:
                 warnings.append(f"{developer}: No mentors (level {EXPERT_MIN_LEVEL}-5) available for novice developer")
             else:
                 warnings.append(f"{developer}: No suitable reviewers found")
@@ -254,46 +366,15 @@ def select_reviewers(
         
         candidates = filtered_candidates
     
-    def sort_key(candidate: ReviewerCandidate) -> tuple:
-        name = candidate["name"]
-        pair_count = get_pair_count(history, developer, name)
-        total_reviews = get_total_reviews_assigned(history, name) + current_assignments.get(name, 0)
-        
-        team_factor = 0
-        if team_mode and dev_team:
-            team_factor = 0 if is_same_team(candidate, dev_team) else 1
-        
-        knowledge_factor = 0
-        if knowledge_mode not in ("anyone", "experts-only"):
-            reviewer_knowledge = candidate.get("knowledge_level", DEFAULT_KNOWLEDGE_LEVEL)
-            if knowledge_mode == "mentorship":
-                knowledge_factor = -reviewer_knowledge if is_novice(dev_knowledge) else 0
-            elif knowledge_mode == "similar-levels":
-                knowledge_factor = abs(reviewer_knowledge - dev_knowledge)
-        
-        return (team_factor, knowledge_factor, pair_count, total_reviews)
-    
-    sorted_candidates = sorted(candidates, key=sort_key)
+    sort_key_fn = build_sort_key(
+        history, developer, current_assignments,
+        team_mode, dev_team, knowledge_mode, dev_knowledge
+    )
+    sorted_candidates = sorted(candidates, key=sort_key_fn)
     selected = [c["name"] for c in sorted_candidates[:num_reviewers]]
     
     if team_mode and dev_team:
-        same_team_count = sum(
-            1 for c in sorted_candidates[:num_reviewers]
-            if is_same_team(c, dev_team)
-        )
-        available_same_team = sum(
-            1 for c in candidates
-            if is_same_team(c, dev_team)
-        )
-        
-        if same_team_count < num_reviewers and available_same_team > 0:
-            warnings.append(
-                f"{developer}: Only {same_team_count}/{num_reviewers} reviewers from same team"
-            )
-        elif available_same_team == 0 and num_reviewers > 0:
-            warnings.append(
-                f"{developer}: No reviewers available in team '{dev_team}', used other teams"
-            )
+        warnings.extend(generate_team_warnings(developer, sorted_candidates, num_reviewers, dev_team))
     
     return selected, warnings
 
@@ -313,7 +394,7 @@ def assign_reviewers(
     history: History,
     num_reviewers: int,
     team_mode: bool,
-    knowledge_mode: str = "anyone"
+    knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE
 ) -> tuple[list[dict], list[str]]:
     """
     Assign reviewers to all developers.
@@ -321,41 +402,37 @@ def assign_reviewers(
     """
     all_warnings = []
     
-    reviewers_list = [
-        {
-            "name": row["name"],
-            "team": get_team(row),
-            "knowledge_level": get_knowledge_level(row)
-        }
-        for row in rows
-        if normalize_bool(row.get("can_review", "false"))
+    developers = [to_developer(row) for row in rows]
+    reviewers = [d for d in developers if d.can_review]
+    
+    reviewers_list: list[ReviewerCandidate] = [
+        {"name": d.name, "team": d.team, "knowledge_level": d.knowledge_level}
+        for d in reviewers
     ]
     
     current_assignments = defaultdict(int)
     
     updated_rows = []
-    for row in rows:
-        new_row = dict(row)
-        dev_name = row["name"]
-        dev_team = get_team(row)
-        dev_knowledge = get_knowledge_level(row)
+    for idx, developer in enumerate(developers):
+        original_row = rows[idx]
         
         if not reviewers_list:
+            new_row = dict(original_row)
             new_row["reviewers"] = ""
             all_warnings.append("No reviewers available in the team")
             updated_rows.append(new_row)
             continue
         
         selected, warnings = select_reviewers(
-            developer=dev_name,
+            developer=developer.name,
             candidates=reviewers_list,
             history=history,
             num_reviewers=num_reviewers,
             team_mode=team_mode,
-            dev_team=dev_team if dev_team else None,
+            dev_team=developer.team if developer.team else None,
             current_assignments=current_assignments,
             knowledge_mode=knowledge_mode,
-            dev_knowledge=dev_knowledge
+            dev_knowledge=developer.knowledge_level
         )
         
         all_warnings.extend(warnings)
@@ -363,18 +440,25 @@ def assign_reviewers(
         for reviewer in selected:
             current_assignments[reviewer] += 1
         
-        update_history(history, dev_name, selected)
+        update_history(history, developer.name, selected)
         
+        new_row = dict(original_row)
         new_row["reviewers"] = ", ".join(selected)
         
         if len(selected) < num_reviewers and selected:
             all_warnings.append(
-                f"{dev_name}: Only assigned {len(selected)}/{num_reviewers} reviewers (not enough available)"
+                f"{developer.name}: Only assigned {len(selected)}/{num_reviewers} reviewers (not enough available)"
             )
         
         updated_rows.append(new_row)
     
     return updated_rows, all_warnings
+
+
+def handle_error(error: Exception) -> None:
+    """Print error message and exit with error code."""
+    print(f"Error: {error}", file=sys.stderr)
+    sys.exit(1)
 
 
 def main():
@@ -383,21 +467,18 @@ def main():
     try:
         rows = load_csv(args.input)
         validate_csv(rows)
-    except FileError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except CSVValidationError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except PRPairingError:
+        handle_error(sys.exc_info()[1])
     
     history = load_history(args.history)
+    knowledge_mode = KnowledgeMode(args.knowledge_mode)
     
     updated_rows, warnings = assign_reviewers(
         rows=rows,
         history=history,
         num_reviewers=args.reviewers,
         team_mode=args.team_mode,
-        knowledge_mode=args.knowledge_mode
+        knowledge_mode=knowledge_mode
     )
     
     fieldnames = list(rows[0].keys())
@@ -406,9 +487,8 @@ def main():
     
     try:
         save_csv(args.input, updated_rows, fieldnames)
-    except FileError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except PRPairingError:
+        handle_error(sys.exc_info()[1])
     
     save_history(args.history, history)
     

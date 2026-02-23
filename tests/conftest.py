@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from pr_pairing import History
+
 
 @pytest.fixture
 def basic_csv_content():
@@ -47,18 +49,18 @@ Frank,false,frontend,5"""
 
 @pytest.fixture
 def empty_history():
-    return {"pairs": {}, "last_run": None}
+    return History(pairs={}, last_run=None)
 
 
 @pytest.fixture
 def sample_history():
-    return {
-        "pairs": {
+    return History(
+        pairs={
             "Alice": {"Bob": 2, "Charlie": 1},
             "Bob": {"Alice": 2, "Dana": 1}
         },
-        "last_run": "2026-02-22T10:00:00Z"
-    }
+        last_run="2026-02-22T10:00:00Z"
+    )
 
 
 @pytest.fixture
@@ -100,7 +102,7 @@ def temp_csv_full(request, csv_full_content):
 @pytest.fixture
 def temp_history(request, empty_history):
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(empty_history, f)
+        json.dump(empty_history.to_dict(), f)
         temp_path = f.name
 
     yield temp_path
