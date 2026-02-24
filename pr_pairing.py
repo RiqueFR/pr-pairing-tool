@@ -26,7 +26,13 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import Optional, TypedDict, Union
+
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
 
 DEFAULT_REVIEWERS = 2
 DEFAULT_KNOWLEDGE_LEVEL = 3
@@ -133,6 +139,16 @@ def parse_args():
         action="store_true",
         help="Ignore existing history and start fresh"
     )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="Exclude a pair from pairing (format: DEV1:DEV2). Can be repeated."
+    )
+    parser.add_argument(
+        "--exclude-file",
+        help="Path to exclusion file (CSV or YAML format)"
+    )
     return parser.parse_args()
 
 
@@ -181,6 +197,90 @@ def save_csv(filepath: str, rows: list[dict], fieldnames: list[str]) -> None:
             writer.writerows(rows)
     except Exception as e:
         raise FileError(f"Error writing output file: {e}")
+
+
+def parse_exclusion_string(exclusion: str, valid_developers: set[str]) -> tuple[str, str] | None:
+    """Parse exclusion string in format DEV1:DEV2."""
+    try:
+        dev, reviewer = exclusion.split(":")
+        dev = dev.strip()
+        reviewer = reviewer.strip()
+        if not dev or not reviewer:
+            return None
+        if dev not in valid_developers:
+            return None
+        if reviewer not in valid_developers:
+            return None
+        return (dev, reviewer)
+    except ValueError:
+        return None
+
+
+def load_exclusions_from_csv(filepath: str) -> set[tuple[str, str]]:
+    """Load exclusion pairs from CSV file."""
+    exclusions = set()
+    try:
+        with open(filepath, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                dev = row.get("developer", "").strip()
+                reviewer = row.get("excluded_reviewer", "").strip()
+                if dev and reviewer:
+                    exclusions.add((dev, reviewer))
+    except FileNotFoundError:
+        raise FileError(f"Exclusion file not found: {filepath}")
+    except Exception as e:
+        raise FileError(f"Error reading exclusion file: {e}")
+    return exclusions
+
+
+def load_exclusions_from_yaml(filepath: str) -> set[tuple[str, str]]:
+    """Load exclusion pairs from YAML file."""
+    if not YAML_AVAILABLE:
+        raise FileError("YAML support requires PyYAML. Install with: pip install pyyaml")
+    
+    exclusions = set()
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        
+        if not data:
+            return exclusions
+        
+        exclusions_list = data.get("exclusions", [])
+        for item in exclusions_list:
+            developers = item.get("developers", [])
+            if len(developers) == 2:
+                exclusions.add((developers[0], developers[1]))
+                exclusions.add((developers[1], developers[0]))
+    except FileNotFoundError:
+        raise FileError(f"Exclusion file not found: {filepath}")
+    except Exception as e:
+        raise FileError(f"Error reading exclusion file: {e}")
+    return exclusions
+
+
+def load_exclusions(filepath: str, valid_developers: set[str]) -> set[tuple[str, str]]:
+    """Load exclusion pairs from file (auto-detect format by extension)."""
+    path = Path(filepath)
+    suffix = path.suffix.lower()
+    
+    if suffix in (".yaml", ".yml"):
+        return load_exclusions_from_yaml(filepath)
+    elif suffix == ".csv":
+        return load_exclusions_from_csv(filepath)
+    else:
+        raise FileError(f"Unsupported exclusion file format: {suffix}. Use .csv or .yaml")
+
+
+def parse_exclusions_cli(exclusions: list[str], valid_developers: set[str]) -> set[tuple[str, str]]:
+    """Parse exclusion list from CLI arguments."""
+    result = set()
+    for exc in exclusions:
+        parsed = parse_exclusion_string(exc, valid_developers)
+        if parsed:
+            result.add(parsed)
+    return result
 
 
 def normalize_bool(value: str) -> bool:
@@ -348,7 +448,8 @@ def select_reviewers(
     dev_team: Optional[str],
     current_assignments: dict[str, int],
     knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
-    dev_knowledge: int = DEFAULT_KNOWLEDGE_LEVEL
+    dev_knowledge: int = DEFAULT_KNOWLEDGE_LEVEL,
+    exclusions: set[tuple[str, str]] = None
 ) -> tuple[list[str], list[str]]:
     """
     Select reviewers for a developer.
@@ -356,10 +457,23 @@ def select_reviewers(
     """
     warnings = []
     
+    if exclusions is None:
+        exclusions = set()
+    
     candidates = [c for c in candidates if c["name"] != developer]
     
     if not candidates:
         return [], [f"No reviewers available for {developer}"]
+    
+    excluded_reviewers = {reviewer for dev, reviewer in exclusions if dev == developer}
+    if excluded_reviewers:
+        candidates = [c for c in candidates if c["name"] not in excluded_reviewers]
+        
+        if not candidates:
+            warnings.append(
+                f"{developer}: All reviewers excluded, cannot assign any reviewers"
+            )
+            return [], warnings
     
     if knowledge_mode != KnowledgeMode.ANYONE:
         filter_fn = get_knowledge_filter(knowledge_mode, dev_knowledge)
@@ -404,13 +518,17 @@ def assign_reviewers(
     history: History,
     num_reviewers: int,
     team_mode: bool,
-    knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE
+    knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
+    exclusions: set[tuple[str, str]] = None
 ) -> tuple[list[dict], list[str]]:
     """
     Assign reviewers to all developers.
     Returns (updated_rows, warnings).
     """
     all_warnings = []
+    
+    if exclusions is None:
+        exclusions = set()
     
     developers = [to_developer(row) for row in rows]
     reviewers = [d for d in developers if d.can_review]
@@ -442,7 +560,8 @@ def assign_reviewers(
             dev_team=developer.team if developer.team else None,
             current_assignments=current_assignments,
             knowledge_mode=knowledge_mode,
-            dev_knowledge=developer.knowledge_level
+            dev_knowledge=developer.knowledge_level,
+            exclusions=exclusions
         )
         
         all_warnings.extend(warnings)
@@ -499,6 +618,27 @@ def main():
     except PRPairingError:
         handle_error(sys.exc_info()[1])
     
+    valid_developers = {row["name"] for row in rows}
+    
+    exclusions: set[tuple[str, str]] = set()
+    
+    if args.exclude:
+        cli_exclusions = parse_exclusions_cli(args.exclude, valid_developers)
+        exclusions.update(cli_exclusions)
+        if cli_exclusions:
+            print(f"Loaded {len(cli_exclusions)} exclusion(s) from CLI arguments")
+    
+    if args.exclude_file:
+        try:
+            file_exclusions = load_exclusions(args.exclude_file, valid_developers)
+            exclusions.update(file_exclusions)
+            print(f"Loaded {len(file_exclusions)} exclusion(s) from file: {args.exclude_file}")
+        except PRPairingError:
+            handle_error(sys.exc_info()[1])
+    
+    if exclusions:
+        print(f"Total exclusions: {len(exclusions)}")
+    
     if args.dry_run:
         print("[DRY RUN] Running in preview mode - no files will be modified\n")
         history = History()
@@ -514,7 +654,8 @@ def main():
         history=history,
         num_reviewers=args.reviewers,
         team_mode=args.team_mode,
-        knowledge_mode=knowledge_mode
+        knowledge_mode=knowledge_mode,
+        exclusions=exclusions
     )
     
     if args.dry_run:
