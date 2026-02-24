@@ -123,6 +123,11 @@ def parse_args():
         default=KnowledgeMode.ANYONE.value,
         help="Knowledge-based pairing mode: anyone (default), experts-only, mentorship, similar-levels"
     )
+    parser.add_argument(
+        "-n", "--dry-run",
+        action="store_true",
+        help="Preview assignments without saving"
+    )
     return parser.parse_args()
 
 
@@ -455,6 +460,25 @@ def assign_reviewers(
     return updated_rows, all_warnings
 
 
+def print_dry_run_summary(updated_rows: list[dict], warnings: list[str]) -> None:
+    """Print preview of assignments without saving."""
+    print("\n[DRY RUN] Preview - No files will be modified")
+    print("-" * 40)
+    print("Assignments:")
+    for row in updated_rows:
+        name = row.get("name", "Unknown")
+        reviewers = row.get("reviewers", "")
+        print(f"  {name}: {reviewers if reviewers else '(no reviewers)'}")
+    print("-" * 40)
+    total = len([r for r in updated_rows if r.get("reviewers")])
+    print(f"Total: {total} developers assigned")
+    
+    if warnings:
+        print("\nWarnings (would appear):")
+        for warning in warnings:
+            print(f"  - {warning}")
+
+
 def handle_error(error: Exception) -> None:
     """Print error message and exit with error code."""
     print(f"Error: {error}", file=sys.stderr)
@@ -470,7 +494,12 @@ def main():
     except PRPairingError:
         handle_error(sys.exc_info()[1])
     
-    history = load_history(args.history)
+    if args.dry_run:
+        print("[DRY RUN] Running in preview mode - no files will be modified\n")
+        history = History()
+    else:
+        history = load_history(args.history)
+    
     knowledge_mode = KnowledgeMode(args.knowledge_mode)
     
     updated_rows, warnings = assign_reviewers(
@@ -481,25 +510,28 @@ def main():
         knowledge_mode=knowledge_mode
     )
     
-    fieldnames = list(rows[0].keys())
-    if "reviewers" not in fieldnames:
-        fieldnames.append("reviewers")
-    
-    try:
-        save_csv(args.input, updated_rows, fieldnames)
-    except PRPairingError:
-        handle_error(sys.exc_info()[1])
-    
-    save_history(args.history, history)
-    
-    print(f"Successfully assigned reviewers to {len(updated_rows)} developers")
-    print(f"Output written to: {args.input}")
-    print(f"History saved to: {args.history}")
-    
-    if warnings:
-        print("\nWarnings:", file=sys.stderr)
-        for warning in warnings:
-            print(f"  - {warning}", file=sys.stderr)
+    if args.dry_run:
+        print_dry_run_summary(updated_rows, warnings)
+    else:
+        fieldnames = list(rows[0].keys())
+        if "reviewers" not in fieldnames:
+            fieldnames.append("reviewers")
+        
+        try:
+            save_csv(args.input, updated_rows, fieldnames)
+        except PRPairingError:
+            handle_error(sys.exc_info()[1])
+        
+        save_history(args.history, history)
+        
+        print(f"Successfully assigned reviewers to {len(updated_rows)} developers")
+        print(f"Output written to: {args.input}")
+        print(f"History saved to: {args.history}")
+        
+        if warnings:
+            print("\nWarnings:", file=sys.stderr)
+            for warning in warnings:
+                print(f"  - {warning}", file=sys.stderr)
 
 
 if __name__ == "__main__":
