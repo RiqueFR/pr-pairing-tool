@@ -128,6 +128,11 @@ def parse_args():
         action="store_true",
         help="Preview assignments without saving"
     )
+    parser.add_argument(
+        "-f", "--fresh",
+        action="store_true",
+        help="Ignore existing history and start fresh"
+    )
     return parser.parse_args()
 
 
@@ -496,6 +501,8 @@ def main():
     
     if args.dry_run:
         print("[DRY RUN] Running in preview mode - no files will be modified\n")
+        history = History()
+    elif args.fresh:
         history = History()
     else:
         history = load_history(args.history)

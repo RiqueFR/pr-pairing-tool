@@ -321,6 +321,73 @@ class TestDryRunMode:
         os.unlink(history_path)
 
 
+class TestFreshMode:
+    """Test fresh mode functionality."""
+    
+    def test_fresh_ignores_existing_history(self, temp_csv):
+        history_path = "./pairing_history.json"
+        
+        if os.path.exists(history_path):
+            os.unlink(history_path)
+        
+        subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        with open(history_path, 'r') as f:
+            history1 = json.load(f)
+        
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "--fresh"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        with open(history_path, 'r') as f:
+            history2 = json.load(f)
+        
+        assert history1 != history2
+        
+        if os.path.exists(history_path):
+            os.unlink(history_path)
+    
+    def test_fresh_short_flag(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "-f"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "Successfully assigned" in result.stdout
+    
+    def test_fresh_with_team_mode(self, temp_csv_teams):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv_teams, "-r", "2", "-t", "--fresh"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+    
+    def test_fresh_with_dry_run(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "--fresh", "--dry-run"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "[DRY RUN]" in result.stdout
+
+
 class TestEdgeCases:
     """Test edge cases and error conditions."""
     
