@@ -37,13 +37,7 @@ from .exclusions import (
     parse_exclusions_cli,
 )
 
-from .main import (
-    setup_logging,
-    parse_exclusion_string,
-    load_exclusions_from_csv,
-    load_exclusions_from_yaml,
-    load_exclusions,
-    parse_exclusions_cli,
+from .pairing import (
     get_knowledge_level,
     get_team,
     to_developer,
@@ -59,6 +53,10 @@ from .main import (
     select_reviewers,
     validate_csv,
     assign_reviewers,
+)
+
+from .main import (
+    setup_logging,
     print_dry_run_summary,
     handle_error,
     main,
