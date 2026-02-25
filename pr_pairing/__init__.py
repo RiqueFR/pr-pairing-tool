@@ -22,12 +22,15 @@ from .config import (
     DEFAULT_REVIEWERS,
 )
 
-from .main import (
-    setup_logging,
+from .io import (
     load_csv,
+    save_csv,
     load_history,
     save_history,
-    save_csv,
+)
+
+from .main import (
+    setup_logging,
     parse_exclusion_string,
     load_exclusions_from_csv,
     load_exclusions_from_yaml,
