@@ -1,9 +1,4 @@
-from .main import (
-    setup_logging,
-    DEFAULT_REVIEWERS,
-    DEFAULT_KNOWLEDGE_LEVEL,
-    EXPERT_MIN_LEVEL,
-    NOVICE_MAX_LEVEL,
+from .models import (
     KnowledgeMode,
     Developer,
     History,
@@ -11,6 +6,14 @@ from .main import (
     PRPairingError,
     CSVValidationError,
     FileError,
+    DEFAULT_KNOWLEDGE_LEVEL,
+    EXPERT_MIN_LEVEL,
+    NOVICE_MAX_LEVEL,
+)
+
+from .main import (
+    setup_logging,
+    DEFAULT_REVIEWERS,
     parse_args,
     CONFIG_SEARCH_PATHS,
     get_home_config_paths,
