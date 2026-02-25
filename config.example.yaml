@@ -1,0 +1,28 @@
+# PR Pairing Tool Configuration
+#
+# This is an example config file. Copy it to one of these locations:
+#   - ./.prpairingrc
+#   - ./pr_pairing.yaml
+#   - ~/.config/pr_pairing/config.yaml
+#   - ~/.prpairingrc
+#
+# Or specify a custom path with: -c /path/to/config.yaml
+
+# Number of reviewers per developer
+reviewers: 2
+
+# Enable team-based pairing (prioritize same-team reviewers)
+team_mode: false
+
+# Knowledge-based pairing mode:
+#   - anyone         : No restrictions (default)
+#   - experts-only   : Only level 4-5 can review
+#   - mentorship     : Experts review novices
+#   - similar-levels : Pair similar levels together
+knowledge_mode: anyone
+
+# History file path
+history: ./pairing_history.json
+
+# Verbose output (true/false or integer)
+verbose: false

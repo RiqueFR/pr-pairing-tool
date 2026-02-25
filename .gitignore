@@ -2,3 +2,10 @@ __pycache__
 pairing_history.json
 team.csv
 plan/
+
+# Config files
+.prpairingrc
+pr_pairing.yaml
+config.yaml
+!.config.example.yaml
+.config/
