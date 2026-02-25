@@ -129,15 +129,14 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
                         value = int(value)
                     setattr(args, arg_name, value)
     
-    if args.verbose is None:
-        verbose_config = config.get("verbose")
-        if verbose_config is not None:
-            if isinstance(verbose_config, bool):
-                args.verbose = 1 if verbose_config else 0
-            elif isinstance(verbose_config, int):
-                args.verbose = verbose_config
-        else:
-            args.verbose = 0
+    verbose_from_config = config.get("verbose")
+    if verbose_from_config is not None:
+        if isinstance(verbose_from_config, bool):
+            args.verbose = 1 if verbose_from_config else 0
+        elif isinstance(verbose_from_config, int):
+            args.verbose = verbose_from_config
+    elif args.verbose is None:
+        args.verbose = 0
     
     if args.quiet is None:
         args.quiet = 0

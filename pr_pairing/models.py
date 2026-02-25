@@ -22,9 +22,18 @@ class Developer:
     can_review: bool
     team: str = ""
     knowledge_level: int = DEFAULT_KNOWLEDGE_LEVEL
+    reviewers: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
-        return asdict(self)
+        """Convert to dictionary for CSV/JSON output, including metadata."""
+        data = asdict(self)
+        # Flatten metadata back into the main dict
+        meta = data.pop("metadata", {})
+        data.update(meta)
+        # Convert reviewers list to comma-separated string for CSV
+        data["reviewers"] = ", ".join(self.reviewers)
+        return data
 
 
 @dataclass
@@ -44,12 +53,6 @@ class History:
             "pairs": self.pairs,
             "last_run": self.last_run
         }
-
-
-class ReviewerCandidate(TypedDict):
-    name: str
-    team: str
-    knowledge_level: int
 
 
 class PRPairingError(Exception):

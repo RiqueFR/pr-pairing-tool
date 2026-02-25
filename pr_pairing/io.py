@@ -2,8 +2,10 @@ import csv
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from .models import History, FileError
+from .models import History, FileError, Developer, DEFAULT_KNOWLEDGE_LEVEL, CSVValidationError
+from .config import normalize_bool
 
 
 def load_csv(filepath: str) -> list[dict]:
@@ -27,6 +29,70 @@ def save_csv(filepath: str, rows: list[dict], fieldnames: list[str]) -> None:
             writer.writerows(rows)
     except Exception as e:
         raise FileError(f"Error writing output file: {e}")
+
+
+def parse_knowledge_level(value: Any) -> int:
+    """Parse knowledge level, defaulting to 3 if invalid."""
+    if not value:
+        return DEFAULT_KNOWLEDGE_LEVEL
+    try:
+        return int(str(value).strip())
+    except (ValueError, TypeError):
+        return DEFAULT_KNOWLEDGE_LEVEL
+
+
+def row_to_developer(row: dict) -> Developer:
+    """Convert CSV row to Developer object."""
+    if "name" not in row:
+        raise CSVValidationError("CSV row missing 'name' column")
+    
+    name = row["name"]
+    can_review = normalize_bool(row.get("can_review", "false"))
+    team = row.get("team", "").strip()
+    knowledge_level = parse_knowledge_level(row.get("knowledge_level"))
+    
+    # Extract reviewers if present
+    reviewers_str = row.get("reviewers", "")
+    reviewers = [r.strip() for r in reviewers_str.split(",") if r.strip()]
+    
+    # Store everything else in metadata
+    standard_keys = {"name", "can_review", "team", "knowledge_level", "reviewers"}
+    metadata = {k: v for k, v in row.items() if k not in standard_keys}
+    
+    return Developer(
+        name=name,
+        can_review=can_review,
+        team=team,
+        knowledge_level=knowledge_level,
+        reviewers=reviewers,
+        metadata=metadata
+    )
+
+
+def load_developers(filepath: str) -> list[Developer]:
+    """Load developers from CSV file."""
+    rows = load_csv(filepath)
+    if not rows:
+        raise CSVValidationError("Input CSV is empty")
+    
+    # Validate required columns
+    if "name" not in rows[0]:
+        raise CSVValidationError("CSV must have a 'name' column")
+    if "can_review" not in rows[0]:
+        raise CSVValidationError("CSV must have a 'can_review' column")
+    
+    return [row_to_developer(row) for row in rows]
+
+
+def save_developers(filepath: str, developers: list[Developer]) -> None:
+    """Save developers back to CSV, preserving original columns via metadata."""
+    if not developers:
+        return
+        
+    dicts = [d.to_dict() for d in developers]
+    # Use keys from first dict as fieldnames to ensure all columns are included
+    fieldnames = list(dicts[0].keys())
+    save_csv(filepath, dicts, fieldnames)
 
 
 def load_history(filepath: str) -> History:

@@ -10,15 +10,17 @@ from pr_pairing import (
     save_csv,
     load_history,
     save_history,
+    load_developers,
+    save_developers,
     normalize_bool,
     get_pair_count,
     get_total_reviews_assigned,
     update_history,
     select_reviewers,
     assign_reviewers,
-    parse_args,
     KnowledgeMode,
     History,
+    Developer,
     load_exclusions_from_csv,
     load_exclusions_from_yaml,
     parse_exclusion_string,
@@ -27,6 +29,7 @@ from pr_pairing import (
     load_config,
     merge_config,
 )
+from pr_pairing.cli import parse_arguments
 
 
 class TestParseArgs:
@@ -40,7 +43,7 @@ class TestParseArgs:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_path]
             
-            args = parse_args()
+            args = parse_arguments()
             args = merge_config({}, args)
             
             assert args.reviewers == 2
@@ -62,7 +65,7 @@ class TestParseArgs:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_path, '-r', '4']
             
-            args = parse_args()
+            args = parse_arguments()
             
             assert args.reviewers == 4
             
@@ -81,7 +84,7 @@ class TestParseArgs:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_path, '-t']
             
-            args = parse_args()
+            args = parse_arguments()
             
             assert args.team_mode is True
             
@@ -108,13 +111,47 @@ class TestParseArgs:
             
             for enum_mode, str_mode in modes:
                 sys.argv = ['pr_pairing.py', '-i', temp_path, '-k', str_mode]
-                args = parse_args()
+                args = parse_arguments()
                 assert args.knowledge_mode == enum_mode.value
             
             sys.argv = old_argv
         finally:
             import os
             os.unlink(temp_path)
+
+
+class TestDeveloperModel:
+    def test_developer_to_dict(self):
+        dev = Developer(
+            name="Alice",
+            can_review=True,
+            team="frontend",
+            knowledge_level=5,
+            reviewers=["Bob", "Charlie"]
+        )
+        
+        d = dev.to_dict()
+        
+        assert d["name"] == "Alice"
+        assert d["can_review"] == True
+        assert d["team"] == "frontend"
+        assert d["knowledge_level"] == 5
+        assert d["reviewers"] == "Bob, Charlie"
+
+    def test_developer_to_dict_with_metadata(self):
+        dev = Developer(
+            name="Alice",
+            can_review=True,
+            team="frontend",
+            knowledge_level=5,
+            reviewers=["Bob"],
+            metadata={"email": "alice@example.com"}
+        )
+        
+        d = dev.to_dict()
+        
+        assert d["name"] == "Alice"
+        assert d["email"] == "alice@example.com"
 
 
 class TestCSVFunctions:
@@ -165,6 +202,85 @@ class TestCSVFunctions:
             saved_rows = list(reader)
         
         assert "reviewers" in saved_rows[0]
+
+
+class TestLoadDevelopers:
+    def test_load_developers_basic(self):
+        content = "name,can_review,team,knowledge_level\nAlice,true,frontend,5\nBob,true,backend,3"
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            developers = load_developers(temp_path)
+            
+            assert len(developers) == 2
+            assert developers[0].name == "Alice"
+            assert developers[0].can_review == True
+            assert developers[0].team == "frontend"
+            assert developers[0].knowledge_level == 5
+            assert developers[1].name == "Bob"
+            assert developers[1].knowledge_level == 3
+        finally:
+            import os
+            os.unlink(temp_path)
+
+    def test_load_developers_normalizes_can_review(self):
+        content = "name,can_review\nAlice,True\nBob,false\nCharlie,yes"
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            developers = load_developers(temp_path)
+            
+            assert developers[0].can_review == True
+            assert developers[1].can_review == False
+            assert developers[2].can_review == True
+        finally:
+            import os
+            os.unlink(temp_path)
+
+    def test_load_developers_parses_knowledge_level(self):
+        content = "name,can_review,knowledge_level\nAlice,3\nBob,invalid\nCharlie,"
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            developers = load_developers(temp_path)
+            
+            assert developers[0].knowledge_level == 3
+            assert developers[1].knowledge_level == 3  # default
+            assert developers[2].knowledge_level == 3  # default
+        finally:
+            import os
+            os.unlink(temp_path)
+
+
+class TestSaveDevelopers:
+    def test_save_developers(self):
+        developers = [
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5, reviewers=["Bob"]),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3, reviewers=[]),
+        ]
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review,team,knowledge_level\n")
+            temp_path = f.name
+
+        try:
+            save_developers(temp_path, developers)
+            
+            devs = load_developers(temp_path)
+            assert len(devs) == 2
+            assert devs[0].reviewers == ["Bob"]
+        finally:
+            import os
+            os.unlink(temp_path)
 
 
 class TestHistoryFunctions:
@@ -260,18 +376,18 @@ class TestHistoryTracking:
 class TestSelectReviewers:
     def test_no_self_review(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Alice", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Alice",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={}
         )
         
@@ -281,19 +397,19 @@ class TestSelectReviewers:
 
     def test_select_correct_number(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Alice", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Alice",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={}
         )
         
@@ -301,17 +417,17 @@ class TestSelectReviewers:
 
     def test_select_fewer_when_not_enough(self):
         candidates = [
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Alice", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Alice",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=3,
             team_mode=False,
-            dev_team=None,
             current_assignments={}
         )
         
@@ -319,19 +435,19 @@ class TestSelectReviewers:
 
     def test_experts_only_filter(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 5},
-            {"name": "Bob", "team": "backend", "knowledge_level": 2},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 4},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=2),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=4),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=3,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
             knowledge_mode=KnowledgeMode.EXPERTS_ONLY
         )
@@ -343,22 +459,21 @@ class TestSelectReviewers:
 
     def test_mentorship_novice_gets_expert(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 5},
-            {"name": "Bob", "team": "backend", "knowledge_level": 2},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 4},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=2),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=4),
         ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=1)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
-            knowledge_mode=KnowledgeMode.MENTORSHIP,
-            dev_knowledge=1
+            knowledge_mode=KnowledgeMode.MENTORSHIP
         )
         
         assert "Bob" not in selected
@@ -367,44 +482,42 @@ class TestSelectReviewers:
 
     def test_mentorship_senior_can_get_anyone(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 5},
-            {"name": "Bob", "team": "backend", "knowledge_level": 2},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 4},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=2),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=4),
         ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=4)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
-            knowledge_mode=KnowledgeMode.MENTORSHIP,
-            dev_knowledge=4
+            knowledge_mode=KnowledgeMode.MENTORSHIP
         )
         
         assert "Bob" in selected or "Alice" in selected or "Charlie" in selected
 
     def test_similar_levels_sorts_by_knowledge_diff(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 5},
-            {"name": "Bob", "team": "backend", "knowledge_level": 1},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=1),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=2)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
-            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS,
-            dev_knowledge=2
+            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS
         )
         
         assert "Charlie" in selected
@@ -412,19 +525,19 @@ class TestSelectReviewers:
 
     def test_team_mode_prioritizes_same_team(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "frontend", "knowledge_level": 3},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Alice", can_review=True, team="frontend")
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Alice",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=True,
-            dev_team="frontend",
             current_assignments={}
         )
         
@@ -433,21 +546,21 @@ class TestSelectReviewers:
 
     def test_history_affects_selection(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(
             pairs={"Dana": {"Alice": 5, "Bob": 0}},
             last_run=None
         )
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={}
         )
         
@@ -456,91 +569,88 @@ class TestSelectReviewers:
 
 class TestAssignReviewers:
     def test_assign_reviewers_basic(self):
-        rows = [
-            {"name": "Alice", "can_review": "true"},
-            {"name": "Bob", "can_review": "true"},
+        developers = [
+            Developer(name="Alice", can_review=True),
+            Developer(name="Bob", can_review=True),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=False,
             knowledge_mode=KnowledgeMode.ANYONE
         )
         
-        assert len(updated_rows) == 2
-        assert "reviewers" in updated_rows[0]
-        assert len(updated_rows[0]["reviewers"]) > 0 or "Bob" in updated_rows[0]["reviewers"] or "Alice" in updated_rows[0]["reviewers"]
+        assert len(developers) == 2
+        assert developers[0].reviewers or developers[1].reviewers
 
     def test_assign_reviewers_respects_can_review_false(self):
-        rows = [
-            {"name": "Alice", "can_review": "true"},
-            {"name": "Bob", "can_review": "false"},
-            {"name": "Charlie", "can_review": "true"},
+        developers = [
+            Developer(name="Alice", can_review=True),
+            Developer(name="Bob", can_review=False),
+            Developer(name="Charlie", can_review=True),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=False,
             knowledge_mode=KnowledgeMode.ANYONE
         )
         
-        bob_row = [r for r in updated_rows if r["name"] == "Bob"][0]
-        alice_row = [r for r in updated_rows if r["name"] == "Alice"][0]
-        
-        assert "Bob" not in alice_row["reviewers"]
+        alice = next(d for d in developers if d.name == "Alice")
+        assert "Bob" not in alice.reviewers
 
     def test_assign_reviewers_with_team_mode(self):
-        rows = [
-            {"name": "Alice", "can_review": "true", "team": "frontend"},
-            {"name": "Bob", "can_review": "true", "team": "frontend"},
-            {"name": "Charlie", "can_review": "true", "team": "backend"},
+        developers = [
+            Developer(name="Alice", can_review=True, team="frontend"),
+            Developer(name="Bob", can_review=True, team="frontend"),
+            Developer(name="Charlie", can_review=True, team="backend"),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=True,
             knowledge_mode=KnowledgeMode.ANYONE
         )
         
-        alice_reviewers = [r for r in updated_rows if r["name"] == "Alice"][0]["reviewers"]
-        assert "Bob" in alice_reviewers or "Charlie" in alice_reviewers
+        alice = next(d for d in developers if d.name == "Alice")
+        assert "Bob" in alice.reviewers or "Charlie" in alice.reviewers
 
     def test_assign_reviewers_with_knowledge_mode(self):
-        rows = [
-            {"name": "Alice", "can_review": "true", "knowledge_level": "5"},
-            {"name": "Bob", "can_review": "true", "knowledge_level": "1"},
-            {"name": "Charlie", "can_review": "true", "knowledge_level": "3"},
+        developers = [
+            Developer(name="Alice", can_review=True, knowledge_level=5),
+            Developer(name="Bob", can_review=True, knowledge_level=1),
+            Developer(name="Charlie", can_review=True, knowledge_level=3),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=False,
             knowledge_mode=KnowledgeMode.EXPERTS_ONLY
         )
         
-        bob_row = [r for r in updated_rows if r["name"] == "Bob"][0]
-        assert "Alice" in bob_row["reviewers"]
+        bob = next(d for d in developers if d.name == "Bob")
+        assert "Alice" in bob.reviewers
 
     def test_assign_reviewers_partial_assignment_warning(self):
-        rows = [
-            {"name": "Alice", "can_review": "true"},
+        developers = [
+            Developer(name="Alice", can_review=True),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=3,
             team_mode=False,
@@ -659,19 +769,19 @@ class TestExclusionFunctions:
 class TestExclusionInSelectReviewers:
     def test_exclude_single_reviewer(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
             exclusions={("Dana", "Bob")}
         )
@@ -682,19 +792,19 @@ class TestExclusionInSelectReviewers:
     
     def test_exclude_multiple_reviewers(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
             exclusions={("Dana", "Alice"), ("Dana", "Bob")}
         )
@@ -705,18 +815,18 @@ class TestExclusionInSelectReviewers:
     
     def test_exclude_all_reviewers(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
             exclusions={("Dana", "Alice"), ("Dana", "Bob")}
         )
@@ -726,19 +836,19 @@ class TestExclusionInSelectReviewers:
     
     def test_exclusion_with_knowledge_filter(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 5},
-            {"name": "Bob", "team": "backend", "knowledge_level": 2},
-            {"name": "Charlie", "team": "backend", "knowledge_level": 4},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=2),
+            Developer(name="Charlie", can_review=True, team="backend", knowledge_level=4),
         ]
+        dev = Developer(name="Dana", can_review=True)
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=False,
-            dev_team=None,
             current_assignments={},
             knowledge_mode=KnowledgeMode.EXPERTS_ONLY,
             exclusions={("Dana", "Charlie")}
@@ -750,19 +860,19 @@ class TestExclusionInSelectReviewers:
     
     def test_exclusion_with_team_mode(self):
         candidates = [
-            {"name": "Alice", "team": "frontend", "knowledge_level": 3},
-            {"name": "Bob", "team": "backend", "knowledge_level": 3},
-            {"name": "Charlie", "team": "frontend", "knowledge_level": 3},
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=3),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=3),
+            Developer(name="Charlie", can_review=True, team="frontend", knowledge_level=3),
         ]
+        dev = Developer(name="Dana", can_review=True, team="frontend")
         history = History(pairs={}, last_run=None)
         
         selected, warnings = select_reviewers(
-            developer="Dana",
+            dev=dev,
             candidates=candidates,
             history=history,
             num_reviewers=2,
             team_mode=True,
-            dev_team="frontend",
             current_assignments={},
             exclusions={("Dana", "Alice")}
         )
@@ -773,15 +883,15 @@ class TestExclusionInSelectReviewers:
 
 class TestExclusionInAssignReviewers:
     def test_assign_reviewers_with_exclusions(self):
-        rows = [
-            {"name": "Alice", "can_review": "true"},
-            {"name": "Bob", "can_review": "true"},
-            {"name": "Charlie", "can_review": "true"},
+        developers = [
+            Developer(name="Alice", can_review=True),
+            Developer(name="Bob", can_review=True),
+            Developer(name="Charlie", can_review=True),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=False,
@@ -789,19 +899,19 @@ class TestExclusionInAssignReviewers:
             exclusions={("Alice", "Bob")}
         )
         
-        alice_row = [r for r in updated_rows if r["name"] == "Alice"][0]
-        assert "Bob" not in alice_row["reviewers"]
+        alice = next(d for d in developers if d.name == "Alice")
+        assert "Bob" not in alice.reviewers
     
     def test_assign_reviewers_exclusion_warning(self):
-        rows = [
-            {"name": "Alice", "can_review": "true"},
-            {"name": "Bob", "can_review": "true"},
-            {"name": "Charlie", "can_review": "true"},
+        developers = [
+            Developer(name="Alice", can_review=True),
+            Developer(name="Bob", can_review=True),
+            Developer(name="Charlie", can_review=True),
         ]
         history = History(pairs={}, last_run=None)
         
-        updated_rows, warnings = assign_reviewers(
-            rows=rows,
+        warnings = assign_reviewers(
+            developers=developers,
             history=history,
             num_reviewers=1,
             team_mode=False,
@@ -809,8 +919,8 @@ class TestExclusionInAssignReviewers:
             exclusions={("Alice", "Bob")}
         )
         
-        alice_row = [r for r in updated_rows if r["name"] == "Alice"][0]
-        assert "Bob" not in alice_row["reviewers"]
+        alice = next(d for d in developers if d.name == "Alice")
+        assert "Bob" not in alice.reviewers
 
 
 class TestFindConfigFile:
@@ -917,7 +1027,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"reviewers": 4}
             args = merge_config(config, args)
@@ -939,7 +1049,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"team_mode": "true"}
             args = merge_config(config, args)
@@ -961,7 +1071,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"knowledge_mode": "mentorship"}
             args = merge_config(config, args)
@@ -983,7 +1093,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"history": "./custom_history.json"}
             args = merge_config(config, args)
@@ -1005,7 +1115,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"verbose": True}
             args = merge_config(config, args)
@@ -1027,7 +1137,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv]
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"verbose": 2}
             args = merge_config(config, args)
@@ -1049,7 +1159,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv, '-r', '5']
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"reviewers": 3}
             args = merge_config(config, args)
@@ -1071,7 +1181,7 @@ class TestMergeConfig:
             old_argv = sys.argv
             sys.argv = ['pr_pairing.py', '-i', temp_csv, '-t']
             
-            args = parse_args()
+            args = parse_arguments()
             
             config = {"team_mode": False}
             args = merge_config(config, args)
