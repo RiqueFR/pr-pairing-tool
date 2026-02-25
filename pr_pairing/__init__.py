@@ -29,6 +29,14 @@ from .io import (
     save_history,
 )
 
+from .exclusions import (
+    parse_exclusion_string,
+    load_exclusions_from_csv,
+    load_exclusions_from_yaml,
+    load_exclusions,
+    parse_exclusions_cli,
+)
+
 from .main import (
     setup_logging,
     parse_exclusion_string,
