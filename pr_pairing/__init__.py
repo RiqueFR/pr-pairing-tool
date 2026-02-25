@@ -11,15 +11,19 @@ from .models import (
     NOVICE_MAX_LEVEL,
 )
 
-from .main import (
-    setup_logging,
-    DEFAULT_REVIEWERS,
+from .config import (
     parse_args,
     CONFIG_SEARCH_PATHS,
     get_home_config_paths,
     find_config_file,
     load_config,
     merge_config,
+    normalize_bool,
+    DEFAULT_REVIEWERS,
+)
+
+from .main import (
+    setup_logging,
     load_csv,
     load_history,
     save_history,
@@ -29,7 +33,6 @@ from .main import (
     load_exclusions_from_yaml,
     load_exclusions,
     parse_exclusions_cli,
-    normalize_bool,
     get_knowledge_level,
     get_team,
     to_developer,
