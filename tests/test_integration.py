@@ -599,3 +599,123 @@ Dana,true"""
                 os.unlink(temp_path)
             if os.path.exists(history_path):
                 os.unlink(history_path)
+
+
+class TestVerboseQuiet:
+    """Test verbose and quiet output modes."""
+
+    def test_default_verbosity_shows_success(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "Successfully assigned" in result.stdout
+
+    def test_verbose_flag_shows_info(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "-v"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "Successfully assigned" in result.stdout
+        assert "Output written to:" in result.stderr
+
+    def test_verbose_flag_short(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "--verbose"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "Output written to:" in result.stderr
+
+    def test_quiet_flag_suppresses_output(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "-q"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert result.stdout == ""
+        assert result.stderr == ""
+
+    def test_quiet_flag_short(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "--quiet"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert result.stdout == ""
+        assert result.stderr == ""
+
+    def test_silent_flag_suppresses_all(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "-qq"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert result.stdout == ""
+        assert result.stderr == ""
+
+    def test_quiet_still_shows_errors(self):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", "nonexistent.csv", "-r", "2", "-q"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 1
+        assert "Error:" in result.stderr
+
+    def test_verbose_with_dry_run(self, temp_csv):
+        result = subprocess.run(
+            ["python", "pr_pairing.py", "-i", temp_csv, "-r", "2", "--dry-run", "-v"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+            capture_output=True,
+            text=True
+        )
+        
+        assert result.returncode == 0
+        assert "[DRY RUN]" in result.stdout
+
+    def test_quiet_with_warnings(self, temp_csv):
+        content = """name,can_review
+Alice,true
+Bob,false
+Charlie,true"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            result = subprocess.run(
+                ["python", "pr_pairing.py", "-i", temp_path, "-r", "2", "-q"],
+                cwd=os.path.dirname(os.path.abspath(__file__)) + "/..",
+                capture_output=True,
+                text=True
+            )
+            
+            assert result.returncode == 0
+            assert result.stdout == ""
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)

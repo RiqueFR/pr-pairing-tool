@@ -20,6 +20,7 @@ Input CSV format:
 import argparse
 import csv
 import json
+import logging
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
@@ -33,6 +34,37 @@ try:
     YAML_AVAILABLE = True
 except ImportError:
     YAML_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(verbosity: int) -> None:
+    """Setup logging based on verbosity level.
+    
+    Maps effective verbosity to logging levels:
+      2: DEBUG   (-vvv) - All internal state, algorithm details
+      1: INFO    (-v)   - Assignment details, candidate info  
+      0: WARNING (none)  - Success message + warnings (default)
+     -1: ERROR   (-q)   - Only errors
+     -2: CRITICAL (-qq) - Only critical (errors + above)
+    """
+    if verbosity >= 2:
+        level = logging.DEBUG
+    elif verbosity == 1:
+        level = logging.INFO
+    elif verbosity == 0:
+        level = logging.WARNING
+    elif verbosity == -1:
+        level = logging.ERROR
+    else:
+        level = logging.CRITICAL
+    
+    logging.basicConfig(
+        level=level,
+        format='%(message)s',
+        stream=sys.stderr
+    )
+
 
 DEFAULT_REVIEWERS = 2
 DEFAULT_KNOWLEDGE_LEVEL = 3
@@ -148,6 +180,18 @@ def parse_args():
     parser.add_argument(
         "--exclude-file",
         help="Path to exclusion file (CSV or YAML format)"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Increase output verbosity (-v, -vv, -vvv)"
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="count",
+        default=0,
+        help="Decrease output verbosity (-q, -qq)"
     )
     return parser.parse_args()
 
@@ -605,12 +649,15 @@ def print_dry_run_summary(updated_rows: list[dict], warnings: list[str]) -> None
 
 def handle_error(error: Exception) -> None:
     """Print error message and exit with error code."""
-    print(f"Error: {error}", file=sys.stderr)
+    logger.error(f"Error: {error}")
     sys.exit(1)
 
 
 def main():
     args = parse_args()
+    
+    verbosity = args.verbose - args.quiet
+    setup_logging(verbosity)
     
     try:
         rows = load_csv(args.input)
@@ -626,21 +673,21 @@ def main():
         cli_exclusions = parse_exclusions_cli(args.exclude, valid_developers)
         exclusions.update(cli_exclusions)
         if cli_exclusions:
-            print(f"Loaded {len(cli_exclusions)} exclusion(s) from CLI arguments")
+            logger.info(f"Loaded {len(cli_exclusions)} exclusion(s) from CLI arguments")
     
     if args.exclude_file:
         try:
             file_exclusions = load_exclusions(args.exclude_file, valid_developers)
             exclusions.update(file_exclusions)
-            print(f"Loaded {len(file_exclusions)} exclusion(s) from file: {args.exclude_file}")
+            logger.info(f"Loaded {len(file_exclusions)} exclusion(s) from file: {args.exclude_file}")
         except PRPairingError:
             handle_error(sys.exc_info()[1])
     
     if exclusions:
-        print(f"Total exclusions: {len(exclusions)}")
+        logger.info(f"Total exclusions: {len(exclusions)}")
     
     if args.dry_run:
-        print("[DRY RUN] Running in preview mode - no files will be modified\n")
+        logger.info("[DRY RUN] Running in preview mode - no files will be modified")
         history = History()
     elif args.fresh:
         history = History()
@@ -672,14 +719,16 @@ def main():
         
         save_history(args.history, history)
         
-        print(f"Successfully assigned reviewers to {len(updated_rows)} developers")
-        print(f"Output written to: {args.input}")
-        print(f"History saved to: {args.history}")
+        verbosity = args.verbose - args.quiet
+        if verbosity >= 0:
+            print(f"Successfully assigned reviewers to {len(updated_rows)} developers")
+            logger.info(f"Output written to: {args.input}")
+            logger.info(f"History saved to: {args.history}")
         
         if warnings:
-            print("\nWarnings:", file=sys.stderr)
+            logger.warning("Warnings:")
             for warning in warnings:
-                print(f"  - {warning}", file=sys.stderr)
+                logger.warning(f"  - {warning}")
 
 
 if __name__ == "__main__":
