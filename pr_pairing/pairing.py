@@ -107,11 +107,12 @@ def build_sort_key(
     current_assignments: dict[str, int],
     team_mode: bool,
     knowledge_mode: KnowledgeMode,
+    balance_mode: bool = True,
 ):
     """Build a sort key function for ranking candidates."""
     def sort_key(candidate: Developer) -> tuple:
         pair_count = get_pair_count(history, dev.name, candidate.name)
-        total_reviews = get_total_reviews_assigned(history, candidate.name) + current_assignments.get(candidate.name, 0)
+        current_load = current_assignments.get(candidate.name, 0)
         
         team_factor = 0
         if team_mode and dev.team:
@@ -124,7 +125,10 @@ def build_sort_key(
             elif knowledge_mode == KnowledgeMode.SIMILAR_LEVELS:
                 knowledge_factor = abs(candidate.knowledge_level - dev.knowledge_level)
         
-        return (team_factor, knowledge_factor, pair_count, total_reviews)
+        if balance_mode:
+            return (current_load, team_factor, knowledge_factor, pair_count)
+        else:
+            return (team_factor, knowledge_factor, pair_count)
     
     return sort_key
 
@@ -137,7 +141,8 @@ def select_reviewers(
     team_mode: bool,
     current_assignments: dict[str, int],
     knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
-    exclusions: Optional[set[tuple[str, str]]] = None
+    exclusions: Optional[set[tuple[str, str]]] = None,
+    balance_mode: bool = True,
 ) -> tuple[list[str], list[str]]:
     """
     Select reviewers for a developer.
@@ -180,7 +185,7 @@ def select_reviewers(
     
     sort_key_fn = build_sort_key(
         history, dev, current_assignments,
-        team_mode, knowledge_mode
+        team_mode, knowledge_mode, balance_mode
     )
     sorted_candidates = sorted(candidates, key=sort_key_fn)
     selected = [c.name for c in sorted_candidates[:num_reviewers]]
@@ -197,7 +202,8 @@ def assign_reviewers(
     num_reviewers: int,
     team_mode: bool,
     knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
-    exclusions: Optional[set[tuple[str, str]]] = None
+    exclusions: Optional[set[tuple[str, str]]] = None,
+    balance_mode: bool = True,
 ) -> list[str]:
     """
     Assign reviewers to all developers.
@@ -225,7 +231,8 @@ def assign_reviewers(
             team_mode=team_mode,
             current_assignments=current_assignments,
             knowledge_mode=knowledge_mode,
-            exclusions=exclusions
+            exclusions=exclusions,
+            balance_mode=balance_mode
         )
         
         all_warnings.extend(warnings)

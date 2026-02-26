@@ -93,6 +93,7 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
         "knowledge_mode": KnowledgeMode.ANYONE.value,
         "history": "./pairing_history.json",
         "verbose": 0,
+        "no_balance": False,
     }
     
     config_key_to_arg = {
@@ -100,6 +101,7 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
         "team_mode": "team_mode",
         "knowledge_mode": "knowledge_mode",
         "history": "history",
+        "no_balance": "no_balance",
     }
     
     for config_key, arg_name in config_key_to_arg.items():
@@ -113,6 +115,8 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
                     value = normalize_bool(value)
                 elif config_key == "reviewers":
                     value = int(value)
+                elif config_key == "no_balance":
+                    value = normalize_bool(value)
                 setattr(args, arg_name, value)
             else:
                 setattr(args, arg_name, defaults[config_key])
@@ -127,6 +131,8 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
                         value = normalize_bool(value)
                     elif config_key == "reviewers":
                         value = int(value)
+                    elif config_key == "no_balance":
+                        value = normalize_bool(value)
                     setattr(args, arg_name, value)
     
     verbose_from_config = config.get("verbose")

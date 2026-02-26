@@ -86,13 +86,16 @@ def main():
     
     knowledge_mode = KnowledgeMode(args.knowledge_mode)
     
+    balance_mode = not args.no_balance if args.no_balance is not None else True
+    
     warnings = assign_reviewers(
         developers=developers,
         history=history,
         num_reviewers=args.reviewers,
         team_mode=args.team_mode,
         knowledge_mode=knowledge_mode,
-        exclusions=exclusions
+        exclusions=exclusions,
+        balance_mode=balance_mode
     )
     
     if args.dry_run:

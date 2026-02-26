@@ -118,6 +118,12 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to config file (optional)"
     )
+    parser.add_argument(
+        "--no-balance",
+        action="store_true",
+        default=None,
+        help="Disable balance mode (assign reviewers without balancing load)"
+    )
     return parser
 
 
