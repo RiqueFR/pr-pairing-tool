@@ -287,19 +287,37 @@ def assign_reviewers_bucket(
     ))
     
     assigned = {dev.name: [] for dev in developers}
-    reviewer_load = defaultdict(int)
+    current_load = defaultdict(int)
     
-    for pair in sorted_pairs:
+    max_iterations = len(all_pairs) * num_reviewers
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        
+        if not sorted_pairs:
+            break
+        
+        pair = sorted_pairs[0]
         dev_name = pair['dev'].name
         reviewer_name = pair['reviewer'].name
         
         if len(assigned[dev_name]) >= num_reviewers:
+            sorted_pairs = sorted_pairs[1:]
             continue
-        if reviewer_load[reviewer_name] >= max_per_reviewer:
+        if current_load[reviewer_name] >= max_per_reviewer:
+            sorted_pairs = sorted_pairs[1:]
             continue
         
         assigned[dev_name].append(reviewer_name)
-        reviewer_load[reviewer_name] += 1
+        current_load[reviewer_name] += 1
+        
+        sorted_pairs = sorted(sorted_pairs[1:], key=lambda x: (
+            x['team_match'],
+            x['knowledge_diff'],
+            current_load[x['reviewer'].name],
+            x['pair_count'],
+        ))
     
     for developer in developers:
         developer.reviewers = assigned[developer.name]
