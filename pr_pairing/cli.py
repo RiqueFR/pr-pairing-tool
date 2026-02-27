@@ -102,6 +102,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="Path to exclusion file (CSV or YAML format)"
     )
     parser.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        help="Require a developer to review another (format: DEV1:DEV2). Can be repeated."
+    )
+    parser.add_argument(
+        "--require-file",
+        default=None,
+        help="Path to required reviewers file (CSV or YAML format)"
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="count",
         default=None,

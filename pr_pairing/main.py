@@ -35,6 +35,11 @@ from .exclusions import (
     load_exclusions,
     parse_exclusions_cli,
 )
+from .requirements import (
+    load_requirements,
+    parse_requirements_cli,
+    check_conflicts,
+)
 from .pairing import assign_reviewers
 from .output import (
     format_output_json,
@@ -98,6 +103,38 @@ def main():
     if exclusions:
         logger.info(f"Total exclusions: {len(exclusions)}")
     
+    requirements = {}
+    
+    if args.require:
+        cli_requirements = parse_requirements_cli(args.require, valid_developers)
+        for dev, revs in cli_requirements.items():
+            if dev not in requirements:
+                requirements[dev] = []
+            requirements[dev].extend(revs)
+        if cli_requirements:
+            logger.info(f"Loaded {len(cli_requirements)} requirement(s) from CLI arguments")
+    
+    if args.require_file:
+        try:
+            file_requirements = load_requirements(args.require_file, valid_developers)
+            for dev, revs in file_requirements.items():
+                if dev not in requirements:
+                    requirements[dev] = []
+                requirements[dev].extend(revs)
+            logger.info(f"Loaded {len(file_requirements)} requirement(s) from file: {args.require_file}")
+        except PRPairingError as e:
+            handle_error(e)
+    
+    if requirements:
+        total_req = sum(len(revs) for revs in requirements.values())
+        logger.info(f"Total requirements: {total_req}")
+        
+        conflicts = check_conflicts(requirements, exclusions)
+        if conflicts:
+            for conflict in conflicts:
+                logger.error(f"Error: {conflict}")
+            handle_error(PRPairingError("Conflicting requirements and exclusions detected"))
+    
     if args.dry_run:
         logger.info("[DRY RUN] Running in preview mode - no files will be modified")
         history = History()
@@ -117,6 +154,7 @@ def main():
         team_mode=args.team_mode,
         knowledge_mode=knowledge_mode,
         exclusions=exclusions,
+        requirements=requirements,
         balance_mode=balance_mode
     )
     
