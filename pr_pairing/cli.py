@@ -136,6 +136,17 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Treat warnings as errors"
     )
+    parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output file path (if extension is .json or .yaml, auto-detects format)"
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["csv", "json", "yaml"],
+        default=None,
+        help="Output format: csv, json, yaml (default: csv). If not csv and no -o, prints to terminal"
+    )
     return parser
 
 

@@ -92,3 +92,81 @@ class TestParseArgs:
         finally:
             import os
             os.unlink(temp_path)
+
+
+class TestOutputArgs:
+    def test_output_file_arg(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_path = f.name
+
+        try:
+            import sys
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_path, '-o', 'output.json']
+            
+            args = parse_arguments()
+            
+            assert args.output == 'output.json'
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_path)
+
+    def test_output_format_arg_json(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_path = f.name
+
+        try:
+            import sys
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_path, '--output-format', 'json']
+            
+            args = parse_arguments()
+            
+            assert args.output_format == 'json'
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_path)
+
+    def test_output_format_arg_yaml(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_path = f.name
+
+        try:
+            import sys
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_path, '--output-format', 'yaml']
+            
+            args = parse_arguments()
+            
+            assert args.output_format == 'yaml'
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_path)
+
+    def test_output_format_default(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_path = f.name
+
+        try:
+            import sys
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_path]
+            
+            args = parse_arguments()
+            
+            assert args.output_format is None
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_path)

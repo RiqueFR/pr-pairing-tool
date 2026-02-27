@@ -36,6 +36,12 @@ from .exclusions import (
     parse_exclusions_cli,
 )
 from .pairing import assign_reviewers
+from .output import (
+    format_output_json,
+    format_output_yaml,
+    get_output_format,
+    write_output,
+)
 from .cli import (
     parse_arguments,
     handle_error,
@@ -117,10 +123,43 @@ def main():
     if args.dry_run:
         print_dry_run_summary(developers, warnings)
     else:
-        try:
-            save_developers(args.input, developers)
-        except PRPairingError as e:
-            handle_error(e)
+        output_format = get_output_format(args.output, args.output_format)
+        
+        params = {
+            "input": args.input,
+            "reviewers": args.reviewers,
+            "team_mode": args.team_mode,
+            "knowledge_mode": args.knowledge_mode if args.knowledge_mode else KnowledgeMode.ANYONE.value
+        }
+        
+        if output_format == "json":
+            output_content = format_output_json(developers, params)
+        elif output_format == "yaml":
+            output_content = format_output_yaml(developers, params)
+        else:
+            output_content = None
+        
+        if args.output:
+            if output_content:
+                write_output(output_content, args.output)
+                logger.info(f"Output written to: {args.output}")
+            else:
+                try:
+                    save_developers(args.input, developers)
+                except PRPairingError as e:
+                    handle_error(e)
+                logger.info(f"Output written to: {args.input}")
+        elif output_format != "csv":
+            print(output_content)
+            try:
+                save_developers(args.input, developers)
+            except PRPairingError as e:
+                handle_error(e)
+        else:
+            try:
+                save_developers(args.input, developers)
+            except PRPairingError as e:
+                handle_error(e)
         
         save_history(args.history, history)
         
