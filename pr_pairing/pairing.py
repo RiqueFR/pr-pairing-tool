@@ -26,6 +26,28 @@ def is_novice(developer: Developer) -> bool:
     return developer.knowledge_level <= NOVICE_MAX_LEVEL
 
 
+def is_valid_knowledge_pair(dev: Developer, reviewer: Developer, knowledge_mode: KnowledgeMode) -> bool:
+    """Check if a (dev, reviewer) pair is valid based on knowledge mode."""
+    if knowledge_mode == KnowledgeMode.ANYONE:
+        return True
+    elif knowledge_mode == KnowledgeMode.EXPERTS_ONLY:
+        return is_expert(reviewer)
+    elif knowledge_mode == KnowledgeMode.MENTORSHIP:
+        if is_novice(dev):
+            return is_expert(reviewer)
+        return True
+    elif knowledge_mode == KnowledgeMode.SIMILAR_LEVELS:
+        return True
+    return True
+
+
+def get_knowledge_diff(dev: Developer, reviewer: Developer, knowledge_mode: KnowledgeMode) -> int:
+    """Get knowledge difference for sorting (only for SIMILAR_LEVELS mode)."""
+    if knowledge_mode == KnowledgeMode.SIMILAR_LEVELS:
+        return abs(reviewer.knowledge_level - dev.knowledge_level)
+    return 0
+
+
 def get_knowledge_filter(knowledge_mode: KnowledgeMode, dev: Developer):
     """Return a filter function based on knowledge mode."""
     
@@ -196,6 +218,123 @@ def select_reviewers(
     return selected, warnings
 
 
+def assign_reviewers_bucket(
+    developers: list[Developer],
+    history: History,
+    num_reviewers: int,
+    team_mode: bool,
+    knowledge_mode: KnowledgeMode = KnowledgeMode.ANYONE,
+    exclusions: Optional[set[tuple[str, str]]] = None,
+) -> list[str]:
+    """
+    Assign reviewers using bucket-based approach for better balance and team coverage.
+    Generates all valid (dev, reviewer) pairs, sorts them, and assigns greedily.
+    """
+    all_warnings = []
+    
+    if exclusions is None:
+        exclusions = set()
+    
+    reviewers = [d for d in developers if d.can_review]
+    if not reviewers:
+        for developer in developers:
+            developer.reviewers = []
+        all_warnings.append("No reviewers available in the team")
+        return all_warnings
+    
+    total_slots = sum(1 for d in developers if d.can_review) * num_reviewers
+    max_per_reviewer = (total_slots + len(reviewers) - 1) // len(reviewers) + 1
+    
+    excluded_pairs = exclusions
+    
+    all_pairs = []
+    for dev in developers:
+        for reviewer in reviewers:
+            if dev.name == reviewer.name:
+                continue
+            
+            if (dev.name, reviewer.name) in excluded_pairs:
+                continue
+            
+            if not is_valid_knowledge_pair(dev, reviewer, knowledge_mode):
+                continue
+            
+            team_match = 0
+            if team_mode and dev.team:
+                team_match = 0 if is_same_team(reviewer, dev.team) else 1
+            
+            knowledge_diff = get_knowledge_diff(dev, reviewer, knowledge_mode)
+            pair_count = get_pair_count(history, dev.name, reviewer.name)
+            
+            all_pairs.append({
+                'dev': dev,
+                'reviewer': reviewer,
+                'team_match': team_match,
+                'knowledge_diff': knowledge_diff,
+                'pair_count': pair_count,
+            })
+    
+    if not all_pairs:
+        for developer in developers:
+            developer.reviewers = []
+            all_warnings.append(f"No reviewers available for {developer.name}")
+        return all_warnings
+    
+    sorted_pairs = sorted(all_pairs, key=lambda x: (
+        x['team_match'],
+        x['knowledge_diff'],
+        x['pair_count'],
+    ))
+    
+    assigned = {dev.name: [] for dev in developers}
+    reviewer_load = defaultdict(int)
+    
+    for pair in sorted_pairs:
+        dev_name = pair['dev'].name
+        reviewer_name = pair['reviewer'].name
+        
+        if len(assigned[dev_name]) >= num_reviewers:
+            continue
+        if reviewer_load[reviewer_name] >= max_per_reviewer:
+            continue
+        
+        assigned[dev_name].append(reviewer_name)
+        reviewer_load[reviewer_name] += 1
+    
+    for developer in developers:
+        developer.reviewers = assigned[developer.name]
+        
+        if len(developer.reviewers) < num_reviewers and developer.reviewers:
+            all_warnings.append(
+                f"{developer.name}: Only assigned {len(developer.reviewers)}/{num_reviewers} reviewers (not enough available)"
+            )
+        
+        if team_mode and developer.team:
+            same_team_count = 0
+            available_same_team = 0
+            for r_name in developer.reviewers:
+                reviewer_obj = next((r for r in reviewers if r.name == r_name), None)
+                if reviewer_obj and is_same_team(reviewer_obj, developer.team):
+                    same_team_count += 1
+            
+            for r in reviewers:
+                if r.name != developer.name and is_same_team(r, developer.team):
+                    available_same_team += 1
+            
+            if same_team_count < num_reviewers and available_same_team > 0:
+                all_warnings.append(
+                    f"{developer.name}: Only {same_team_count}/{num_reviewers} reviewers from same team"
+                )
+            elif available_same_team == 0 and num_reviewers > 0 and developer.team:
+                all_warnings.append(
+                    f"{developer.name}: No reviewers available in team '{developer.team}', used other teams"
+                )
+        
+        update_history(history, developer.name, developer.reviewers)
+    
+    return all_warnings
+
+
 def assign_reviewers(
     developers: list[Developer],
     history: History,
@@ -209,10 +348,20 @@ def assign_reviewers(
     Assign reviewers to all developers.
     Modifies Developer objects in place and returns list of all warnings.
     """
-    all_warnings = []
-    
     if exclusions is None:
         exclusions = set()
+    
+    if balance_mode:
+        return assign_reviewers_bucket(
+            developers=developers,
+            history=history,
+            num_reviewers=num_reviewers,
+            team_mode=team_mode,
+            knowledge_mode=knowledge_mode,
+            exclusions=exclusions,
+        )
+    
+    all_warnings = []
     
     reviewers = [d for d in developers if d.can_review]
     current_assignments = defaultdict(int)
