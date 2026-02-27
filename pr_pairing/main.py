@@ -42,6 +42,10 @@ from .cli import (
     print_dry_run_summary,
     print_success_summary,
 )
+from .validation import (
+    validate_csv,
+    print_validation_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,18 @@ def main():
         developers = load_developers(args.input)
     except PRPairingError as e:
         handle_error(e)
+    
+    validation_result = validate_csv(developers)
+    verbosity = args.verbose - args.quiet
+    print_validation_result(validation_result, args.input, developers, verbosity)
+    if verbosity >= 0:
+        print()
+
+    if args.validate:
+        return
+
+    if args.strict and (not validation_result.is_valid or validation_result.warnings):
+        sys.exit(1)
     
     valid_developers = {dev.name for dev in developers}
     

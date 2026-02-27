@@ -124,6 +124,18 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Disable balance mode (assign reviewers without balancing load)"
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        default=None,
+        help="Validate input without processing"
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=None,
+        help="Treat warnings as errors"
+    )
     return parser
 
 
