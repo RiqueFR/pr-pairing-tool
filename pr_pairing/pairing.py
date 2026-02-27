@@ -242,9 +242,6 @@ def assign_reviewers_bucket(
         all_warnings.append("No reviewers available in the team")
         return all_warnings
     
-    total_slots = sum(1 for d in developers if d.can_review) * num_reviewers
-    max_per_reviewer = (total_slots + len(reviewers) - 1) // len(reviewers) + 1
-    
     excluded_pairs = exclusions
     
     all_pairs = []
@@ -303,9 +300,6 @@ def assign_reviewers_bucket(
         reviewer_name = pair['reviewer'].name
         
         if len(assigned[dev_name]) >= num_reviewers:
-            sorted_pairs = sorted_pairs[1:]
-            continue
-        if current_load[reviewer_name] >= max_per_reviewer:
             sorted_pairs = sorted_pairs[1:]
             continue
         
