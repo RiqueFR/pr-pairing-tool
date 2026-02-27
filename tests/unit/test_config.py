@@ -275,3 +275,135 @@ class TestMergeConfig:
         finally:
             import os
             os.unlink(temp_csv)
+    
+    def test_merge_config_exclude_list(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"exclude": ["Alice:Bob", "Charlie:Dana"]}
+            args = merge_config(config, args)
+            
+            assert args.exclude == ["Alice:Bob", "Charlie:Dana"]
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)
+    
+    def test_merge_config_require_list(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"require": ["Bob:Alice", "Charlie:Bob"]}
+            args = merge_config(config, args)
+            
+            assert args.require == ["Bob:Alice", "Charlie:Bob"]
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)
+    
+    def test_merge_config_strict(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"strict": True}
+            args = merge_config(config, args)
+            
+            assert args.strict is True
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)
+    
+    def test_merge_config_output(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"output": "output.csv"}
+            args = merge_config(config, args)
+            
+            assert args.output == "output.csv"
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)
+    
+    def test_merge_config_output_format(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"output_format": "json"}
+            args = merge_config(config, args)
+            
+            assert args.output_format == "json"
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)
+    
+    def test_merge_config_quiet(self):
+        import sys
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write("name,can_review\nAlice,true")
+            temp_csv = f.name
+        
+        try:
+            old_argv = sys.argv
+            sys.argv = ['pr_pairing.py', '-i', temp_csv]
+            
+            args = parse_arguments()
+            
+            config = {"quiet": 1}
+            args = merge_config(config, args)
+            
+            assert args.quiet == 1
+            
+            sys.argv = old_argv
+        finally:
+            import os
+            os.unlink(temp_csv)

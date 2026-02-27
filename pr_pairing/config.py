@@ -86,6 +86,15 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
     - knowledge_mode -> args.knowledge_mode
     - history -> args.history
     - verbose -> args.verbose (adjusts based on value)
+    - no_balance -> args.no_balance
+    - exclude -> args.exclude (list)
+    - exclude_file -> args.exclude_file
+    - require -> args.require (list)
+    - require_file -> args.require_file
+    - strict -> args.strict
+    - output -> args.output
+    - output_format -> args.output_format
+    - quiet -> args.quiet
     """
     defaults = {
         "reviewers": DEFAULT_REVIEWERS,
@@ -94,6 +103,16 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
         "history": "./pairing_history.json",
         "verbose": 0,
         "no_balance": False,
+        "exclude": [],
+        "exclude_file": None,
+        "require": [],
+        "require_file": None,
+        "strict": False,
+        "output": None,
+        "output_format": None,
+        "dry_run": False,
+        "fresh": False,
+        "quiet": 0,
     }
     
     config_key_to_arg = {
@@ -102,7 +121,21 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
         "knowledge_mode": "knowledge_mode",
         "history": "history",
         "no_balance": "no_balance",
+        "exclude": "exclude",
+        "exclude_file": "exclude_file",
+        "require": "require",
+        "require_file": "require_file",
+        "strict": "strict",
+        "output": "output",
+        "output_format": "output_format",
+        "dry_run": "dry_run",
+        "fresh": "fresh",
+        "quiet": "quiet",
     }
+    
+    list_keys = {"exclude", "require"}
+    bool_keys = {"team_mode", "no_balance", "strict", "dry_run", "fresh"}
+    int_keys = {"reviewers", "quiet"}
     
     for config_key, arg_name in config_key_to_arg.items():
         current_value = getattr(args, arg_name)
@@ -111,12 +144,12 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
             value_from_config = config.get(config_key)
             if value_from_config is not None:
                 value = value_from_config
-                if config_key == "team_mode":
+                if config_key in list_keys and isinstance(value, list):
+                    pass
+                elif config_key in bool_keys:
                     value = normalize_bool(value)
-                elif config_key == "reviewers":
+                elif config_key in int_keys:
                     value = int(value)
-                elif config_key == "no_balance":
-                    value = normalize_bool(value)
                 setattr(args, arg_name, value)
             else:
                 setattr(args, arg_name, defaults[config_key])
@@ -127,12 +160,12 @@ def merge_config(config: dict, args: argparse.Namespace) -> argparse.Namespace:
                 value_from_config = config.get(config_key)
                 if value_from_config is not None:
                     value = value_from_config
-                    if config_key == "team_mode":
+                    if config_key in list_keys and isinstance(value, list):
+                        pass
+                    elif config_key in bool_keys:
                         value = normalize_bool(value)
-                    elif config_key == "reviewers":
+                    elif config_key in int_keys:
                         value = int(value)
-                    elif config_key == "no_balance":
-                        value = normalize_bool(value)
                     setattr(args, arg_name, value)
     
     verbose_from_config = config.get("verbose")
@@ -206,6 +239,17 @@ def parse_args():
         help="Path to exclusion file (CSV or YAML format)"
     )
     parser.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        help="Require a developer to review another (format: DEV1:DEV2). Can be repeated."
+    )
+    parser.add_argument(
+        "--require-file",
+        default=None,
+        help="Path to required reviewers file (CSV or YAML format)"
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="count",
         default=None,
@@ -221,5 +265,22 @@ def parse_args():
         "-c", "--config",
         default=None,
         help="Path to config file (optional)"
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=None,
+        help="Treat warnings as errors"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output file path"
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["csv", "json", "yaml"],
+        default=None,
+        help="Output format: csv, json, yaml"
     )
     return parser.parse_args()

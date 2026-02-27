@@ -26,3 +26,34 @@ history: ./pairing_history.json
 
 # Verbose output (true/false or integer)
 verbose: false
+
+# Disable balance mode
+no_balance: false
+
+# Exclude pairs from pairing (list of "DEV1:DEV2" strings)
+# exclude:
+#   - Alice:Bob
+#   - Charlie:Dana
+
+# Path to exclusion file
+# exclude_file: exclusions.yaml
+
+# Require developers to review specific others (list of "DEV1:DEV2" strings)
+# require:
+#   - Bob:Alice
+#   - Bob:Charlie
+
+# Path to required reviewers file
+# require_file: requirements.yaml
+
+# Treat warnings as errors
+strict: false
+
+# Output file path
+# output: output.csv
+
+# Output format: csv, json, yaml
+# output_format: csv
+
+# Quiet mode (suppress output)
+# quiet: 0

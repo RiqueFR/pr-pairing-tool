@@ -90,7 +90,7 @@ def main():
         cli_exclusions = parse_exclusions_cli(args.exclude, valid_developers)
         exclusions.update(cli_exclusions)
         if cli_exclusions:
-            logger.info(f"Loaded {len(cli_exclusions)} exclusion(s) from CLI arguments")
+            logger.info(f"Loaded {len(cli_exclusions)} exclusion(s)")
     
     if args.exclude_file:
         try:
@@ -112,7 +112,7 @@ def main():
                 requirements[dev] = []
             requirements[dev].extend(revs)
         if cli_requirements:
-            logger.info(f"Loaded {len(cli_requirements)} requirement(s) from CLI arguments")
+            logger.info(f"Loaded {len(cli_requirements)} requirement(s)")
     
     if args.require_file:
         try:
