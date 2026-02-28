@@ -60,8 +60,7 @@ def get_knowledge_filter(knowledge_mode: KnowledgeMode, dev: Developer):
         return True
     
     def similar_levels_filter(candidate: Developer) -> bool:
-        # Currently just returns True, but could be implemented as +/- 1 level
-        return True
+        return abs(candidate.knowledge_level - dev.knowledge_level) <= 1
     
     filters = {
         KnowledgeMode.EXPERTS_ONLY: experts_only_filter,
@@ -349,6 +348,8 @@ def select_reviewers(
                 warnings.append(f"{dev.name}: No experts (level {EXPERT_MIN_LEVEL}-5) available for review")
             elif knowledge_mode == KnowledgeMode.MENTORSHIP:
                 warnings.append(f"{dev.name}: No mentors (level {EXPERT_MIN_LEVEL}-5) available for novice developer")
+            elif knowledge_mode == KnowledgeMode.SIMILAR_LEVELS:
+                warnings.append(f"{dev.name}: No reviewers within 1 knowledge level available")
             else:
                 warnings.append(f"{dev.name}: No suitable reviewers found")
             return [], warnings

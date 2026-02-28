@@ -131,7 +131,7 @@ class TestSelectReviewers:
         
         assert "Bob" in selected or "Alice" in selected or "Charlie" in selected
 
-    def test_similar_levels_sorts_by_knowledge_diff(self):
+    def test_similar_levels_filters_by_one_level(self):
         candidates = [
             Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
             Developer(name="Bob", can_review=True, team="backend", knowledge_level=1),
@@ -139,7 +139,7 @@ class TestSelectReviewers:
         ]
         dev = Developer(name="Dana", can_review=True, knowledge_level=2)
         history = History(pairs={}, last_run=None)
-        
+
         selected, warnings = select_reviewers(
             dev=dev,
             candidates=candidates,
@@ -149,9 +149,73 @@ class TestSelectReviewers:
             current_assignments={},
             knowledge_mode=KnowledgeMode.SIMILAR_LEVELS
         )
-        
+
         assert "Charlie" in selected
         assert "Bob" in selected
+        assert "Alice" not in selected
+
+    def test_similar_levels_warns_when_no_similar_reviewers(self):
+        candidates = [
+            Developer(name="Alice", can_review=True, team="frontend", knowledge_level=5),
+            Developer(name="Bob", can_review=True, team="backend", knowledge_level=5),
+        ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=1)
+        history = History(pairs={}, last_run=None)
+
+        selected, warnings = select_reviewers(
+            dev=dev,
+            candidates=candidates,
+            history=history,
+            num_reviewers=2,
+            team_mode=False,
+            current_assignments={},
+            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS
+        )
+
+        assert len(selected) == 0
+        assert any("within 1 knowledge level" in w for w in warnings)
+
+    def test_similar_levels_allows_exact_level_match(self):
+        candidates = [
+            Developer(name="Alice", can_review=True, knowledge_level=3),
+            Developer(name="Bob", can_review=True, knowledge_level=3),
+        ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=3)
+        history = History(pairs={}, last_run=None)
+
+        selected, warnings = select_reviewers(
+            dev=dev,
+            candidates=candidates,
+            history=history,
+            num_reviewers=2,
+            team_mode=False,
+            current_assignments={},
+            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS
+        )
+
+        assert "Alice" in selected
+        assert "Bob" in selected
+
+    def test_similar_levels_edge_case_level_1(self):
+        candidates = [
+            Developer(name="Alice", can_review=True, knowledge_level=2),
+            Developer(name="Bob", can_review=True, knowledge_level=3),
+        ]
+        dev = Developer(name="Dana", can_review=True, knowledge_level=1)
+        history = History(pairs={}, last_run=None)
+
+        selected, warnings = select_reviewers(
+            dev=dev,
+            candidates=candidates,
+            history=history,
+            num_reviewers=2,
+            team_mode=False,
+            current_assignments={},
+            knowledge_mode=KnowledgeMode.SIMILAR_LEVELS
+        )
+
+        assert "Alice" in selected
+        assert "Bob" not in selected
 
     def test_team_mode_prioritizes_same_team(self):
         candidates = [
