@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from .models import Developer
 
@@ -66,7 +66,7 @@ def check_optional_columns(developers: list[Developer], errors: list[str], warni
             warnings.append(f"Row {idx}: Name has leading/trailing whitespace")
 
 
-def print_validation_result(result: ValidationResult, filepath: str, developers: list[Developer] = None, verbosity: int = 0) -> None:
+def print_validation_result(result: ValidationResult, filepath: str, developers: Optional[list[Developer]] = None, verbosity: int = 0) -> None:
     """Print validation result in the specified format."""
     if verbosity < 0:
         return

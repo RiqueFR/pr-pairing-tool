@@ -172,8 +172,8 @@ def parse_arguments() -> argparse.Namespace:
         try:
             config = load_config(config_file)
             logger.info(f"Loaded config from: {config_file}")
-        except PRPairingError:
-            handle_error(sys.exc_info()[1])
+        except PRPairingError as e:
+            handle_error(e)
     elif args.config:
         logger.warning(f"Config file not found: {args.config}")
     
