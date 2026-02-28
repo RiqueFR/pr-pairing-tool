@@ -1,13 +1,10 @@
-from pathlib import Path
-from typing import Optional
-
-from .models import FileError, PRPairingError
-
-YAML_AVAILABLE = True
-try:
-    import yaml
-except ImportError:
-    YAML_AVAILABLE = False
+from .models import PRPairingError
+from .rules import (
+    YAML_AVAILABLE,
+    load_rules_from_file,
+    load_csv_rules_as_dict,
+    load_yaml_rules_as_dict,
+)
 
 
 def parse_requirement_string(requirement: str, valid_developers: set[str]) -> tuple[str, str] | None:
@@ -39,23 +36,7 @@ def load_requirements_from_csv(filepath: str) -> dict[str, list[str]]:
     
     Returns dict: {developer: [required_reviewers]}
     """
-    import csv
-    requirements = {}
-    try:
-        with open(filepath, "r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                developer = row.get("developer", "").strip()
-                reviewer = row.get("required_reviewer", "").strip()
-                if developer and reviewer:
-                    if developer not in requirements:
-                        requirements[developer] = []
-                    requirements[developer].append(reviewer)
-    except FileNotFoundError:
-        raise FileError(f"Requirements file not found: {filepath}")
-    except Exception as e:
-        raise FileError(f"Error reading requirements file: {e}")
-    return requirements
+    return load_csv_rules_as_dict(filepath, "developer", "required_reviewer")
 
 
 def load_requirements_from_yaml(filepath: str) -> dict[str, list[str]]:
@@ -70,55 +51,20 @@ def load_requirements_from_yaml(filepath: str) -> dict[str, list[str]]:
     
     Returns dict: {developer: [required_reviewers]}
     """
-    if not YAML_AVAILABLE:
-        raise FileError("YAML support requires PyYAML. Install with: pip install pyyaml")
-    
-    import yaml
-    requirements = {}
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        
-        if not data:
-            return requirements
-        
-        requirements_list = data.get("requirements", [])
-        for item in requirements_list:
-            developer = item.get("developer", "").strip()
-            reviewers = item.get("required_reviewers", [])
-            if developer and reviewers:
-                requirements[developer] = reviewers
-    except FileNotFoundError:
-        raise FileError(f"Requirements file not found: {filepath}")
-    except Exception as e:
-        raise FileError(f"Error reading requirements file: {e}")
-    return requirements
+    return load_yaml_rules_as_dict(filepath, "developer", "required_reviewers", root_key="requirements")
 
 
 def load_requirements(filepath: str, valid_developers: set[str]) -> dict[str, list[str]]:
     """Load required reviewers from file (auto-detect format by extension)."""
-    path = Path(filepath)
-    suffix = path.suffix.lower()
-    
-    if suffix in (".yaml", ".yml"):
-        requirements = load_requirements_from_yaml(filepath)
-    elif suffix == ".csv":
-        requirements = load_requirements_from_csv(filepath)
-    else:
-        raise FileError(f"Unsupported requirements file format: {suffix}. Use .csv or .yaml")
-    
-    invalid_developers = [dev for dev in requirements if dev not in valid_developers]
-    if invalid_developers:
-        raise FileError(f"Invalid developers in requirements file: {', '.join(invalid_developers)}")
-    
-    all_reviewers = set()
-    for reviewers in requirements.values():
-        all_reviewers.update(reviewers)
-    invalid_reviewers = [rev for rev in all_reviewers if rev not in valid_developers]
-    if invalid_reviewers:
-        raise FileError(f"Invalid reviewers in requirements file: {', '.join(invalid_reviewers)}")
-    
-    return requirements
+    return load_rules_from_file(  # type: ignore[return-value]
+        filepath,
+        key_field="developer",
+        value_field="required_reviewer",
+        valid_keys=valid_developers,
+        valid_values=valid_developers,
+        as_dict=True,
+        root_key="requirements",
+    )
 
 
 def parse_requirements_cli(requirements: list[str], valid_developers: set[str]) -> dict[str, list[str]]:

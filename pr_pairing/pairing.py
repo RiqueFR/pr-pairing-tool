@@ -155,6 +155,104 @@ def build_sort_key(
     return sort_key
 
 
+def get_available_reviewers(developers: list[Developer]) -> tuple[list[Developer], dict[str, Developer], dict[str, Developer]]:
+    """Get available reviewers and lookup dictionaries.
+    
+    Returns: (reviewers_list, reviewers_by_name, developers_by_name)
+    """
+    reviewers = [d for d in developers if d.can_review]
+    reviewers_by_name = {d.name: d for d in reviewers}
+    developers_by_name = {d.name: d for d in developers}
+    return reviewers, reviewers_by_name, developers_by_name
+
+
+def validate_and_process_requirements(
+    requirements: dict[str, list[str]],
+    developers_by_name: dict[str, Developer],
+    reviewers_by_name: dict[str, Developer],
+    exclusions: set[tuple[str, str]],
+    knowledge_mode: KnowledgeMode,
+) -> tuple[dict[str, list[str]], set[str], list[str]]:
+    """Validate and process requirements.
+    
+    Returns: (required_assignments, required_reviewers_used, warnings)
+    """
+    required_assignments: dict[str, list[str]] = {}
+    required_reviewers_used: set[str] = set()
+    warnings: list[str] = []
+    
+    for dev_name, required_list in requirements.items():
+        if dev_name not in developers_by_name:
+            warnings.append(f"Requirement for unknown developer: {dev_name}")
+            continue
+        
+        dev = developers_by_name[dev_name]
+        assigned = []
+        
+        for reviewer_name in required_list:
+            if reviewer_name not in reviewers_by_name:
+                warnings.append(
+                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
+                    f"{reviewer_name} cannot review (can_review=false or not found)"
+                )
+                continue
+            
+            reviewer = reviewers_by_name[reviewer_name]
+            
+            if reviewer_name == dev_name:
+                warnings.append(f"Skipping self-requirement: {dev_name}:{reviewer_name}")
+                continue
+            
+            if (dev_name, reviewer_name) in exclusions:
+                continue
+            
+            if not is_valid_knowledge_pair(dev, reviewer, knowledge_mode):
+                warnings.append(
+                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
+                    f"knowledge mode constraint not met"
+                )
+                continue
+            
+            assigned.append(reviewer_name)
+            required_reviewers_used.add(reviewer_name)
+        
+        required_assignments[dev_name] = assigned
+    
+    return required_assignments, required_reviewers_used, warnings
+
+
+def generate_bucket_team_warnings(
+    developer: Developer,
+    reviewers: list[Developer],
+    num_reviewers: int,
+) -> list[str]:
+    """Generate team warnings for bucket-based assignment."""
+    if not developer.team:
+        return []
+    
+    reviewer_names = set(developer.reviewers)
+    assigned_same_team = sum(
+        1 for r in reviewers
+        if r.name in reviewer_names and is_same_team(r, developer.team)
+    )
+    available_same_team = sum(
+        1 for r in reviewers
+        if r.name != developer.name and is_same_team(r, developer.team)
+    )
+    
+    warnings = []
+    if assigned_same_team < num_reviewers and available_same_team > 0:
+        warnings.append(
+            f"{developer.name}: Only {assigned_same_team}/{num_reviewers} reviewers from same team"
+        )
+    elif available_same_team == 0 and num_reviewers > 0:
+        warnings.append(
+            f"{developer.name}: No reviewers available in team '{developer.team}', used other teams"
+        )
+    
+    return warnings
+
+
 def select_reviewers(
     dev: Developer,
     candidates: list[Developer],
@@ -250,9 +348,7 @@ def assign_reviewers_bucket(
     if requirements is None:
         requirements = {}
     
-    reviewers = [d for d in developers if d.can_review]
-    reviewers_by_name = {d.name: d for d in reviewers}
-    developers_by_name = {d.name: d for d in developers}
+    reviewers, reviewers_by_name, developers_by_name = get_available_reviewers(developers)
     
     if not reviewers:
         for developer in developers:
@@ -260,47 +356,13 @@ def assign_reviewers_bucket(
         all_warnings.append("No reviewers available in the team")
         return all_warnings
     
-    excluded_pairs = exclusions
+    req_assignments, req_reviewers_used, req_warnings = validate_and_process_requirements(
+        requirements, developers_by_name, reviewers_by_name, exclusions, knowledge_mode
+    )
+    all_warnings.extend(req_warnings)
     
-    required_assignments = {}
-    required_reviewers_used = set()
-    
-    for dev_name, required_list in requirements.items():
-        if dev_name not in developers_by_name:
-            all_warnings.append(f"Requirement for unknown developer: {dev_name}")
-            continue
-        
-        dev = developers_by_name[dev_name]
-        assigned = []
-        
-        for reviewer_name in required_list:
-            if reviewer_name not in reviewers_by_name:
-                all_warnings.append(
-                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
-                    f"{reviewer_name} cannot review (can_review=false or not found)"
-                )
-                continue
-            
-            reviewer = reviewers_by_name[reviewer_name]
-            
-            if reviewer_name == dev_name:
-                all_warnings.append(f"Skipping self-requirement: {dev_name}:{reviewer_name}")
-                continue
-            
-            if (dev_name, reviewer_name) in exclusions:
-                continue
-            
-            if not is_valid_knowledge_pair(dev, reviewer, knowledge_mode):
-                all_warnings.append(
-                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
-                    f"knowledge mode constraint not met"
-                )
-                continue
-            
-            assigned.append(reviewer_name)
-            required_reviewers_used.add(reviewer_name)
-        
-        required_assignments[dev_name] = assigned
+    required_assignments = req_assignments
+    required_reviewers_used = req_reviewers_used
     
     all_pairs = []
     for dev in developers:
@@ -314,7 +376,7 @@ def assign_reviewers_bucket(
                 if reviewer.name in required_assignments[dev.name]:
                     continue
             
-            if (dev.name, reviewer.name) in excluded_pairs:
+            if (dev.name, reviewer.name) in exclusions:
                 continue
             
             if not is_valid_knowledge_pair(dev, reviewer, knowledge_mode):
@@ -393,25 +455,7 @@ def assign_reviewers_bucket(
             )
         
         if team_mode and developer.team:
-            same_team_count = 0
-            available_same_team = 0
-            for r_name in developer.reviewers:
-                reviewer_obj = next((r for r in reviewers if r.name == r_name), None)
-                if reviewer_obj and is_same_team(reviewer_obj, developer.team):
-                    same_team_count += 1
-            
-            for r in reviewers:
-                if r.name != developer.name and is_same_team(r, developer.team):
-                    available_same_team += 1
-            
-            if same_team_count < num_reviewers and available_same_team > 0:
-                all_warnings.append(
-                    f"{developer.name}: Only {same_team_count}/{num_reviewers} reviewers from same team"
-                )
-            elif available_same_team == 0 and num_reviewers > 0 and developer.team:
-                all_warnings.append(
-                    f"{developer.name}: No reviewers available in team '{developer.team}', used other teams"
-                )
+            all_warnings.extend(generate_bucket_team_warnings(developer, reviewers, num_reviewers))
         
         update_history(history, developer.name, developer.reviewers)
     
@@ -451,50 +495,19 @@ def assign_reviewers(
     
     all_warnings = []
     
-    reviewers = [d for d in developers if d.can_review]
-    reviewers_by_name = {d.name: d for d in reviewers}
-    developers_by_name = {d.name: d for d in developers}
+    reviewers, reviewers_by_name, developers_by_name = get_available_reviewers(developers)
     current_assignments = defaultdict(int)
     
-    required_assignments = {}
-    required_reviewers_used = set()
+    req_assignments, req_reviewers_used, req_warnings = validate_and_process_requirements(
+        requirements, developers_by_name, reviewers_by_name, exclusions, knowledge_mode
+    )
+    all_warnings.extend(req_warnings)
     
-    for dev_name, required_list in requirements.items():
-        if dev_name not in developers_by_name:
-            all_warnings.append(f"Requirement for unknown developer: {dev_name}")
-            continue
-        
-        dev = developers_by_name[dev_name]
-        assigned = []
-        
-        for reviewer_name in required_list:
-            if reviewer_name not in reviewers_by_name:
-                all_warnings.append(
-                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
-                    f"{reviewer_name} cannot review (can_review=false or not found)"
-                )
-                continue
-            
-            if reviewer_name == dev_name:
-                all_warnings.append(f"Skipping self-requirement: {dev_name}:{reviewer_name}")
-                continue
-            
-            if (dev_name, reviewer_name) in exclusions:
-                continue
-            
-            reviewer = reviewers_by_name[reviewer_name]
-            if not is_valid_knowledge_pair(dev, reviewer, knowledge_mode):
-                all_warnings.append(
-                    f"Cannot fulfill requirement: '{dev_name}:{reviewer_name}' - "
-                    f"knowledge mode constraint not met"
-                )
-                continue
-            
-            assigned.append(reviewer_name)
-            required_reviewers_used.add(reviewer_name)
-            current_assignments[reviewer_name] += 1
-        
-        required_assignments[dev_name] = assigned
+    required_assignments = req_assignments
+    required_reviewers_used = req_reviewers_used
+    
+    for reviewer_name in required_reviewers_used:
+        current_assignments[reviewer_name] += 1
     
     for developer in developers:
         if not reviewers:
