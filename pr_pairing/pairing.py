@@ -166,6 +166,47 @@ def get_available_reviewers(developers: list[Developer]) -> tuple[list[Developer
     return reviewers, reviewers_by_name, developers_by_name
 
 
+def init_assignment_state(
+    developers: list[Developer],
+    required_assignments: dict[str, list[str]],
+    required_reviewers_used: set[str],
+) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """Initialize assignments dict and current_load counter from required assignments."""
+    assigned = {dev_name: list(reqs) for dev_name, reqs in required_assignments.items()}
+    for dev in developers:
+        if dev.name not in assigned:
+            assigned[dev.name] = []
+
+    current_load: dict[str, int] = defaultdict(int)
+    for reviewer_name in required_reviewers_used:
+        current_load[reviewer_name] += 1
+
+    return assigned, current_load
+
+
+def finalize_developer_assignment(
+    developer: Developer,
+    reviewers: list[Developer],
+    history: History,
+    num_reviewers: int,
+    team_mode: bool,
+    all_warnings: list[str],
+    assigned_reviewers: list[str],
+) -> None:
+    """Common post-assignment logic for a developer."""
+    developer.reviewers = assigned_reviewers[:num_reviewers]
+
+    if len(developer.reviewers) < num_reviewers and developer.reviewers:
+        all_warnings.append(
+            f"{developer.name}: Only assigned {len(developer.reviewers)}/{num_reviewers} reviewers (not enough available)"
+        )
+
+    if team_mode and developer.team:
+        all_warnings.extend(generate_bucket_team_warnings(developer, reviewers, num_reviewers))
+
+    update_history(history, developer.name, developer.reviewers)
+
+
 def validate_and_process_requirements(
     requirements: dict[str, list[str]],
     developers_by_name: dict[str, Developer],
@@ -410,14 +451,9 @@ def assign_reviewers_bucket(
         x['pair_count'],
     ))
     
-    assigned = {dev_name: list(reqs) for dev_name, reqs in required_assignments.items()}
-    for dev in developers:
-        if dev.name not in assigned:
-            assigned[dev.name] = []
-    
-    current_load = defaultdict(int)
-    for reviewer_name in required_reviewers_used:
-        current_load[reviewer_name] += 1
+    assigned, current_load = init_assignment_state(
+        developers, required_assignments, required_reviewers_used
+    )
     
     max_iterations = len(all_pairs) * num_reviewers
     iteration = 0
@@ -447,17 +483,10 @@ def assign_reviewers_bucket(
         ))
     
     for developer in developers:
-        developer.reviewers = assigned[developer.name]
-        
-        if len(developer.reviewers) < num_reviewers and developer.reviewers:
-            all_warnings.append(
-                f"{developer.name}: Only assigned {len(developer.reviewers)}/{num_reviewers} reviewers (not enough available)"
-            )
-        
-        if team_mode and developer.team:
-            all_warnings.extend(generate_bucket_team_warnings(developer, reviewers, num_reviewers))
-        
-        update_history(history, developer.name, developer.reviewers)
+        finalize_developer_assignment(
+            developer, reviewers, history, num_reviewers,
+            team_mode, all_warnings, assigned[developer.name]
+        )
     
     return all_warnings
 
