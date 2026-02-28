@@ -1,3 +1,27 @@
+"""
+Input Validation Module
+
+This module handles validation of developer data. The validation pipeline is divided
+into three stages, each handled by different modules:
+
+1. Structural Validation (io.py):
+   - Validates CSV file exists and can be read
+   - Checks required columns ('name', 'can_review') are present
+   - Converts CSV rows to Developer objects
+
+2. Semantic Validation (this module - validation.py):
+   - Validates Developer objects have valid values
+   - Checks knowledge_level is in range 1-5
+   - Validates name is not empty
+   - Ensures at least one reviewer is available
+
+3. Reference Validation (rules.py):
+   - Validates requirements/exclusions reference valid developers
+   - Performed when loading rule files
+
+The separation allows for granular error reporting and different handling strategies.
+"""
+
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -19,8 +43,26 @@ class ValidationResult:
         return len(self.warnings)
 
 
-def validate_csv(developers: list[Developer]) -> ValidationResult:
-    """Validate a list of Developer objects and return validation result."""
+def validate_developer_data(developers: list[Developer]) -> ValidationResult:
+    """Validate developer data for PR pairing.
+    
+    This is the main entry point for semantic validation of Developer objects.
+    It validates:
+    - Non-empty developer list
+    - At least one reviewer available (can_review=true)
+    - All names are non-empty
+    - Knowledge levels are within valid range (1-5)
+    - can_review values are boolean
+    
+    For structural validation (CSV columns), see io.load_developers().
+    For reference validation (valid developer names), see rules loading functions.
+    
+    Args:
+        developers: List of Developer objects to validate
+        
+    Returns:
+        ValidationResult with any errors or warnings found
+    """
     errors = []
     warnings = []
 
@@ -39,7 +81,12 @@ def validate_csv(developers: list[Developer]) -> ValidationResult:
 
 
 def check_required_columns(developers: list[Developer], errors: list[str]) -> None:
-    """Check that required columns are present and valid."""
+    """Check that at least one reviewer is available.
+    
+    Args:
+        developers: List of Developer objects
+        errors: List to append error messages to
+    """
     has_reviewer = False
     for dev in developers:
         if dev.can_review:
@@ -51,7 +98,19 @@ def check_required_columns(developers: list[Developer], errors: list[str]) -> No
 
 
 def check_optional_columns(developers: list[Developer], errors: list[str], warnings: list[str]) -> None:
-    """Validate optional columns and generate warnings/errors."""
+    """Validate optional columns and generate warnings/errors.
+    
+    Checks:
+    - Name is not empty
+    - knowledge_level is in range 1-5
+    - can_review is boolean
+    - Name has no leading/trailing whitespace (warning)
+    
+    Args:
+        developers: List of Developer objects
+        errors: List to append error messages to
+        warnings: List to append warning messages to
+    """
     for idx, dev in enumerate(developers, start=1):
         if not dev.name or not dev.name.strip():
             errors.append(f"Row {idx}: Empty name")
@@ -103,3 +162,6 @@ def print_validation_result(result: ValidationResult, filepath: str, developers:
 
     status_str = f"{status} ({', '.join(parts)})" if parts else status
     print(f"Status: {status_str}")
+
+
+validate_csv = validate_developer_data
